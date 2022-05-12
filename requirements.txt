@@ -1,0 +1,5 @@
+astroquery==0.4.3
+asyncio==3.4.3
+asyncpg==0.25.0
+numpy==1.22.3
+aio-pika==7.2.0

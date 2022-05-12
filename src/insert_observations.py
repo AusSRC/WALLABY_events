@@ -4,10 +4,9 @@ import sys
 import json
 import asyncio
 import asyncpg
-import optparse
-import configparser
 import datetime
 from astroquery.utils.tap.core import TapPlus
+from utils import parse_config
 
 
 URL = 'https://casda.csiro.au/casda_vo_tools/tap'
@@ -19,20 +18,7 @@ async def insert_observations():
     To be done once at initialisation.
 
     """
-    args = optparse.OptionParser()
-    args.add_option('-c', dest="config", default="./config.ini")
-    options, arguments = args.parse_args()
-    parser = configparser.ConfigParser()
-    parser.read(options.config)
-
-    database_creds = parser['Database']
-    dsn = {
-        'host': database_creds['host'],
-        'port': database_creds['port'],
-        'user': database_creds['user'],
-        'password': database_creds['password'],
-        'database': database_creds['database']
-    }
+    dsn, _ = parse_config()
 
     # TAP query
     loop = asyncio.get_event_loop()
@@ -58,6 +44,9 @@ async def insert_observations():
         else:
             if r['filename'] not in val['files']:
                 val['files'].append(r['filename'])
+
+    for k, v in results_map.items():
+        print(k, v)
 
     # Write observations to database
     conn = None
