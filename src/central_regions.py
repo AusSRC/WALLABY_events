@@ -92,10 +92,10 @@ async def process_centre_regions(loop):
                 A_id, B_id, uuid
             )
             
-            # Check for existing centre tile jobs
-            existing_job = await conn.fetch(
-                "SELECT * FROM wallaby.postprocessing \
-                WHERE run_name = $1",
+            # See if there is a completed post-processing job for the same tile
+            completed_job = await conn.fetch(
+                'SELECT * FROM wallaby.postprocessing \
+                WHERE run_name = $1 AND status = "COMPLETED"',
                 uuid
             )
 
@@ -104,7 +104,7 @@ async def process_centre_regions(loop):
             await publisher.setup(loop, r_dsn)
 
             # Submit a post-processing job
-            if not existing_job:
+            if not completed_job:
                 # TODO: logging submitting job
                 params = {
                     'username': 'ashen',
@@ -118,10 +118,15 @@ async def process_centre_regions(loop):
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
 
-                # TODO: add entry to database
-            else:
-                # TODO(austin): determine logic when postprocessing has been run already
-                print("Probably need to check other stuff")
+                # Add post-processing job entry to database
+                await conn.execute(
+                    "INSERT INTO wallaby.postprocessing \
+                    (run_name, status) \
+                    VALUES ($1, $2) \
+                    ON CONFLICT ON CONSTRAINT postprocessing_run_name_key \
+                    DO NOTHING;",
+                    uuid, "QUEUED"
+                )
         return
     except Exception as e:
         raise
