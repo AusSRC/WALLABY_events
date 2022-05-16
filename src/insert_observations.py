@@ -18,7 +18,7 @@ async def insert_observations():
     To be done once at initialisation.
 
     """
-    dsn, _ = parse_config()
+    dsn, _, _ = parse_config()
 
     # TAP query
     loop = asyncio.get_event_loop()

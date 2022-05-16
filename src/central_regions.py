@@ -68,7 +68,7 @@ async def process_centre_regions(loop):
     5. Run post-processing pipeline
     
     """
-    db_dsn, r_dsn = parse_config()
+    db_dsn, r_dsn, workflow_keys = parse_config()
     conn = None
     try:
         conn = await asyncpg.connect(dsn=None, **db_dsn)
@@ -80,9 +80,11 @@ async def process_centre_regions(loop):
         pairs = get_footprint_pairs(res)
         matches = add_footprints_to_tiles(res, pairs)
 
-        for match in matches:
-            # Update database
+        for v in list(zip(pairs, matches)):
+            pair, match = v
+            A_idx, B_idx = pair
             A_id, B_id, uuid = match
+            # Update database
             await conn.fetch(
                 'UPDATE wallaby.tile \
                 SET "footprint_A" = $1, "footprint_B" = $2 \
@@ -105,16 +107,18 @@ async def process_centre_regions(loop):
             if not existing_job:
                 # TODO: logging submitting job
                 params = {
-                    'pipeline_key': 'c37654c0-4401-45e0-b078-03039f19efe0',
+                    'username': 'ashen',
+                    'pipeline_key': workflow_keys['postprocessing_key'],
                     'params': {
-                        "RUN_NAME": "refactor_test",
-                        "FOOTPRINTS": "/mnt/shared/wallaby/data/image.restored.i.NGC5044_1A.SB33879.cube.contsub.fits, /mnt/shared/wallaby/data/image.restored.i.NGC5044_1B.SB34302.cube.contsub.fits",
-                        "WEIGHTS": "/mnt/shared/wallaby/data/weights.i.NGC5044_1A.SB33879.cube.fits, /mnt/shared/wallaby/data/weights.i.NGC5044_1B.SB34302.cube.fits",
+                        "RUN_NAME": uuid,
+                        "FOOTPRINTS": f"{res[A_idx]['image_cube_file']}, {res[B_idx]['image_cube_file']}",
+                        "WEIGHTS": f"{res[A_idx]['weights_cube_file']}, {res[B_idx]['weights_cube_file']}"
                     }
                 }
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
-                print("Published mock message")
+
+                # TODO: add entry to database
             else:
                 # TODO(austin): determine logic when postprocessing has been run already
                 print("Probably need to check other stuff")

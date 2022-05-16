@@ -21,4 +21,9 @@ def parse_config():
         'database': database_creds['database']
     }
     rabbitmq_dsn = parser['RabbitMQ']['dsn']
-    return db_dsn, rabbitmq_dsn
+    workflow_keys = {
+        'footprint_check_key': parser['Pipeline']['footprint_check_key'],
+        'postprocessing_key': parser['Pipeline']['postprocessing_key']
+    }
+
+    return db_dsn, rabbitmq_dsn, workflow_keys

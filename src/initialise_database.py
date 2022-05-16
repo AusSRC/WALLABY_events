@@ -92,7 +92,5 @@ async def fetch_entries():
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(fetch_entries())
-    finally:
-        loop.close()
+    loop.create_task(fetch_entries())
+    loop.run_forever()

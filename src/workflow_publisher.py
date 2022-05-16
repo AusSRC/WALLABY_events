@@ -9,6 +9,7 @@ from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
 CASDA_EXCHANGE = 'aussrc.casda'
 CASDA_QUEUE = 'aussrc.casda.wallaby'
 WALLABY_WORKFLOW_EXCHANGE = 'aussrc.workflow.submit'
+WALLABY_WORKFLOW_ROUTING_KEY = 'pipeline'
 
 
 class WorkflowPublisher(object):
@@ -43,4 +44,4 @@ class WorkflowPublisher(object):
 
         """
         msg = Message(body, delivery_mode=DeliveryMode.PERSISTENT)
-        await self.workflow_exchange.publish(msg, routing_key="")
+        await self.workflow_exchange.publish(msg, routing_key=WALLABY_WORKFLOW_ROUTING_KEY)
