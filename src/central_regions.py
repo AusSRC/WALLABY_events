@@ -94,8 +94,8 @@ async def process_centre_regions(loop):
             
             # See if there is a completed post-processing job for the same tile
             completed_job = await conn.fetch(
-                'SELECT * FROM wallaby.postprocessing \
-                WHERE run_name = $1 AND status = "COMPLETED"',
+                "SELECT * FROM wallaby.postprocessing \
+                WHERE run_name = $1 AND status = 'COMPLETED'",
                 uuid
             )
 
@@ -134,8 +134,17 @@ async def process_centre_regions(loop):
         if conn:
             await conn.close()
 
+async def _repeat(loop):
+    """Run process_centre_regions periodically
+
+    """
+    INTERVAL = 500
+
+    while True:
+        await asyncio.sleep(INTERVAL)
+        await process_centre_regions(loop)
+
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    loop.create_task(process_centre_regions(loop))
-    loop.run_forever()
+    loop.run_until_complete(_repeat(loop))
