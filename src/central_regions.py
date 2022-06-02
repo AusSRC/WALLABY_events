@@ -128,6 +128,17 @@ async def process_centre_regions(loop):
                 }
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
+
+                # Write entry to database
+                await conn.execute(
+                    "INSERT INTO wallaby.postprocessing \
+                    (name, status, region) \
+                    VALUES ($1, $2, $3) \
+                    ON CONFLICT ON CONSTRAINT postprocessing_name_key \
+                    DO NOTHING;",
+                    uuid, "QUEUED", region
+                )
+                logging.info(f"Adding postprocessing entry with name={uuid} into the WALLABY database.")
             else:
                 logging.info(f"Tile {uuid} already processed, skipping.")
         return
