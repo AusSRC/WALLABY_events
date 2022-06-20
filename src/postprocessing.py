@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-import logging
 import sys
+import logging
+import math
 import json
 import asyncio
 import asyncpg
@@ -83,6 +84,28 @@ def get_adjacent_tiles(tiles):
                 logging.info(f'Found adjacent tiles {tiles[i]["identifier"]} and {tiles[j]["identifier"]}')
                 pairs.append((i, j))
     return pairs
+
+def adjacent_above(c_incoming, c_compare):
+    """Logic for determining if the comparison tile centre is adjacent above
+    the incoming tile centre.
+    
+    """
+    ra_i, dec_i = c_incoming
+    ra_c, dec_c = c_compare
+    if (dec_c > dec_i) & (ra_i > ra_c - math.radians(3.)) & (ra_i < ra_c + math.radians(3.)):
+        return True
+    return False
+
+def adjacent_below(c_incoming, c_compare):
+    """Logic for determining if the comparison tile centre is adjacent below
+    the incoming tile centre.
+    
+    """
+    ra_i, dec_i = c_incoming
+    ra_c, dec_c = c_compare
+    if (dec_c < dec_i) & (ra_i > ra_c - math.radians(3.)) & (ra_i < ra_c + math.radians(3.)):
+        return True
+    return False
 
 async def centre_regions(conn, publisher, pipeline_key, res):
     """Identify centre regions from observations.
@@ -205,6 +228,101 @@ async def declination_band(conn, publisher, pipeline_key, res):
         else:
             logging.info(f"Adjacent region between {tileA} and {tileB} already processed, skipping.")
 
+async def outer_regions(conn, publisher, pipeline_key, res, phase):
+    """Run post-processing on regions of tiles with no adjacent tiles.
+    1. Get tile that has been processed
+    2. Compare against all expected tiles to see if it is adjacent
+    3. If no adjacent on either side, submit a post-processing job for that side of the cube.
+
+    """
+    expected_tiles = await conn.fetch(
+        "SELECT * FROM wallaby.tile WHERE phase = $1",
+        phase
+    )
+    for tile in res:
+        # Compare against all other tiles
+        c_i = (math.radians(float(tile['ra'])), math.radians(float(tile['dec'])))
+        has_above = False
+        has_below = False
+        for t in expected_tiles:
+            c = (math.radians(float(t['ra'])), math.radians(float(t['dec'])))
+            if adjacent_above(c_i, c):
+                has_above = True
+            if adjacent_below(c_i, c):
+                has_below = True
+
+        # Submit jobs if there is an outer region
+        if not has_above:
+            run_name = f"{tile['identifier']}_a"
+            completed_job = await conn.fetch(
+                "SELECT * FROM wallaby.postprocessing \
+                WHERE (name = $1) AND status = 'COMPLETED'",
+                run_name
+            )
+            if not completed_job:
+                logging.info(f"Processing top outer region for tile {tile['identifier']}")
+                c_ra = float(tile['ra'])
+                c_dec = float(tile['dec'])
+                region = f"{c_ra - 3.0}, {c_ra + 3.0}, {c_dec + 1.0}, {c_dec + 3.0}"
+                params = {
+                    'username': 'ashen',
+                    'pipeline_key': pipeline_key,
+                    'params': {
+                        "RUN_NAME": run_name,
+                        "REGION": region,
+                        "IMAGE_CUBE": tile['image_cube_file'],
+                    }
+                }
+                logging.info(f"Job parameters: {params}")
+                msg = json.dumps(params).encode()
+                await publisher.publish(msg)
+
+                # Write entry to database
+                await conn.execute(
+                    "INSERT INTO wallaby.postprocessing \
+                    (name, status, region) \
+                    VALUES ($1, $2, $3) \
+                    ON CONFLICT ON CONSTRAINT postprocessing_name_key \
+                    DO NOTHING;",
+                    run_name, "QUEUED", region
+                )
+                logging.info(f"Adding postprocessing entry with name={run_name} into the WALLABY database.")
+        if not has_below:
+            run_name = f"{tile['identifier']}_b"
+            completed_job = await conn.fetch(
+                "SELECT * FROM wallaby.postprocessing \
+                WHERE (name = $1) AND status = 'COMPLETED'",
+                run_name
+            )
+            if not completed_job:
+                logging.info(f"Processing bottom outer region for tile {tile['identifier']}")
+                c_ra = float(tile['ra'])
+                c_dec = float(tile['dec'])
+                region = f"{c_ra - 3.0}, {c_ra + 3.0}, {c_dec - 3.0}, {c_dec - 1.0}"
+                params = {
+                    'username': 'ashen',
+                    'pipeline_key': pipeline_key,
+                    'params': {
+                        "RUN_NAME": run_name,
+                        "REGION": region,
+                        "IMAGE_CUBE": tile['image_cube_file'],
+                    }
+                }
+                logging.info(f"Job parameters: {params}")
+                msg = json.dumps(params).encode()
+                await publisher.publish(msg)
+
+                # Write entry to database
+                await conn.execute(
+                    "INSERT INTO wallaby.postprocessing \
+                    (name, status, region) \
+                    VALUES ($1, $2, $3) \
+                    ON CONFLICT ON CONSTRAINT postprocessing_name_key \
+                    DO NOTHING;",
+                    run_name, "QUEUED", region
+                )
+                logging.info(f"Adding postprocessing entry with name={run_name} into the WALLABY database.")
+
 async def process_observations(loop):
     """Run post-processing pipeline on observations as they become avaialable in the database.
     2. Process central regions
@@ -214,12 +332,11 @@ async def process_observations(loop):
     PHASE = "Pilot 2"
     conn = None
     db_dsn, r_dsn, workflow_keys = parse_config()
-    pipeline_key = workflow_keys['postprocessing_key']
     try:
         # Set up database and rabbitMQ connections
         conn = await asyncpg.connect(dsn=None, **db_dsn)
         publisher = WorkflowPublisher()
-        await publisher.setup(loop, r_dsn)
+        await publisher.setup(loop, r_dsn['dsn'])
 
         # 1. Processing centre regions of tiles
         logging.info("Processing centre regions of tiles")
@@ -231,7 +348,7 @@ async def process_observations(loop):
         logging.info(f"Found {len(obs_res)} observations in the database")
         for obs in obs_res:
             logging.info(f"Observation: {obs}")
-        await centre_regions(conn, publisher, pipeline_key, obs_res)
+        await centre_regions(conn, publisher, workflow_keys['postprocessing_key'], obs_res)
 
         # 2. Process adjacent tiles in declination bands
         logging.info("Processing adjacent tiles in declination bands")
@@ -241,7 +358,11 @@ async def process_observations(loop):
         logging.info(f"Found {len(tile_res)} observations in the database")
         for t in tile_res:
             logging.info(f"Tile: {t}")
-        await declination_band(conn, publisher, pipeline_key, tile_res)
+        await declination_band(conn, publisher, workflow_keys['postprocessing_key'], tile_res)
+
+        # 3. Process outer regions of tiles
+        logging.info("Processing outer regions of tiles with no adjacent tiles")
+        await outer_regions(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
         
         return
     except Exception as e:
