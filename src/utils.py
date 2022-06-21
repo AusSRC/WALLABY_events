@@ -19,3 +19,11 @@ def generate_tile_uuid(ra, dec):
     
     """
     return f"{str(int(round(ra))).rjust(3, '0')}{'+' if dec >= 0 else '-'}{str(int(abs(round(dec)))).rjust(2, '0')}"
+
+
+def region_from_tile_centre(ra, dec):
+    """Run post-processing in fixed region sizes in RA and Dec based on centre position.
+    Makes 4 x 4 degree region on sky.
+
+    """
+    return f"{ra - 2.0}, {ra + 2.0}, {dec - 2.0}, {dec + 2.0}"

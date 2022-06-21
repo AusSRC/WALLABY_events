@@ -9,7 +9,7 @@ import asyncpg
 import datetime
 import numpy as np
 
-from utils import parse_config, generate_tile_uuid
+from utils import parse_config, generate_tile_uuid, region_from_tile_centre
 from workflow_publisher import WorkflowPublisher
 
 
@@ -86,24 +86,44 @@ def get_adjacent_tiles(tiles):
     return pairs
 
 def adjacent_above(c_incoming, c_compare):
-    """Logic for determining if the comparison tile centre is adjacent above
-    the incoming tile centre.
+    """Check if input tile centre is above a comparison tile centre
     
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
-    if (dec_c > dec_i) & (ra_i > ra_c - math.radians(3.)) & (ra_i < ra_c + math.radians(3.)):
+    if (dec_c > dec_i) & (dec_c < dec_i + math.radians(7.0)) & (ra_i > ra_c - math.radians(6.)) & (ra_i < ra_c + math.radians(6.)):
         return True
     return False
 
 def adjacent_below(c_incoming, c_compare):
-    """Logic for determining if the comparison tile centre is adjacent below
-    the incoming tile centre.
+    """Check if input tile centre is below a comparison tile centre
     
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
-    if (dec_c < dec_i) & (ra_i > ra_c - math.radians(3.)) & (ra_i < ra_c + math.radians(3.)):
+    if (dec_c < dec_i) & (dec_c > dec_i - math.radians(7.0)) & (ra_i > ra_c - math.radians(6.)) & (ra_i < ra_c + math.radians(6.)):
+        return True
+    return False
+
+def adjacent_left(c_incoming, c_compare):
+    """Check if input tile centre is to the left of a comparison tile centre
+    
+    """
+    ra_i, dec_i = c_incoming
+    ra_c, dec_c = c_compare
+    # TODO(austin): smaller RA is left?
+    if (ra_i < ra_c) & (ra_i > ra_c - math.radians(7.0)) & (dec_i > dec_c - math.radians(6.)) & (dec_i < dec_c + math.radians(6.)):
+        return True
+    return False
+
+def adjacent_right(c_incoming, c_compare):
+    """Check if input tile centre is to the right of a comparison tile centre
+    
+    """
+    ra_i, dec_i = c_incoming
+    ra_c, dec_c = c_compare
+    # TODO(austin): smaller RA is left?
+    if (ra_i > ra_c) & (ra_i < ra_c + math.radians(7.0)) & (dec_i > dec_c - math.radians(6.)) & (dec_i < dec_c + math.radians(6.)):
         return True
     return False
 
@@ -138,12 +158,12 @@ async def centre_regions(conn, publisher, pipeline_key, res):
             WHERE name = $1 AND status = 'COMPLETED'",
             uuid
         )
-
+ 
         # Submit a post-processing job
         if not completed_job:
             ra_centre = (float(res[A_idx]['ra']) + float(res[B_idx]['ra'])) / 2
             dec_centre = (float(res[A_idx]['dec']) + float(res[B_idx]['dec'])) / 2
-            region = f"{ra_centre - 2.0}, {ra_centre + 2.0}, {dec_centre - 2.0}, {dec_centre + 2.0}"
+            region = region_from_tile_centre(ra_centre, dec_centre)
             logging.info(f"Submitting job for centre region of tile {uuid}")
             params = {
                 'username': 'ashen',
@@ -198,7 +218,7 @@ async def declination_band(conn, publisher, pipeline_key, res):
             # Identify region
             ra_centre = (float(tileA['ra']) + float(tileB['ra'])) / 2.0
             dec_centre = (float(tileA['dec']) + float(tileB['dec'])) / 2.0
-            region = f"{ra_centre - 2.0}, {ra_centre + 2.0}, {dec_centre - 2.0}, {dec_centre + 2.0}"
+            region = region_from_tile_centre(ra_centre, dec_centre)
 
             # Submit job
             params = {
@@ -228,7 +248,7 @@ async def declination_band(conn, publisher, pipeline_key, res):
         else:
             logging.info(f"Adjacent region between {tileA} and {tileB} already processed, skipping.")
 
-async def outer_regions(conn, publisher, pipeline_key, res, phase):
+async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
     """Run post-processing on regions of tiles with no adjacent tiles.
     1. Get tile that has been processed
     2. Compare against all expected tiles to see if it is adjacent
@@ -244,12 +264,18 @@ async def outer_regions(conn, publisher, pipeline_key, res, phase):
         c_i = (math.radians(float(tile['ra'])), math.radians(float(tile['dec'])))
         has_above = False
         has_below = False
+        has_left = False
+        has_right = False
         for t in expected_tiles:
             c = (math.radians(float(t['ra'])), math.radians(float(t['dec'])))
             if adjacent_above(c_i, c):
                 has_above = True
             if adjacent_below(c_i, c):
                 has_below = True
+            if adjacent_left(c_i, c):
+                has_left = True
+            if adjacent_right(c_i, c):
+                has_right = True
 
         # Submit jobs if there is an outer region
         if not has_above:
@@ -261,9 +287,9 @@ async def outer_regions(conn, publisher, pipeline_key, res, phase):
             )
             if not completed_job:
                 logging.info(f"Processing top outer region for tile {tile['identifier']}")
-                c_ra = float(tile['ra'])
-                c_dec = float(tile['dec'])
-                region = f"{c_ra - 3.0}, {c_ra + 3.0}, {c_dec + 1.0}, {c_dec + 3.0}"
+                ra_centre = float(tile['ra'])
+                dec_centre = float(tile['dec']) + 3.0
+                region = region_from_tile_centre(ra_centre, dec_centre)
                 params = {
                     'username': 'ashen',
                     'pipeline_key': pipeline_key,
@@ -296,9 +322,79 @@ async def outer_regions(conn, publisher, pipeline_key, res, phase):
             )
             if not completed_job:
                 logging.info(f"Processing bottom outer region for tile {tile['identifier']}")
-                c_ra = float(tile['ra'])
-                c_dec = float(tile['dec'])
-                region = f"{c_ra - 3.0}, {c_ra + 3.0}, {c_dec - 3.0}, {c_dec - 1.0}"
+                ra_centre = float(tile['ra'])
+                dec_centre = float(tile['dec']) - 3.0
+                region = region_from_tile_centre(ra_centre, dec_centre)
+                params = {
+                    'username': 'ashen',
+                    'pipeline_key': pipeline_key,
+                    'params': {
+                        "RUN_NAME": run_name,
+                        "REGION": region,
+                        "IMAGE_CUBE": tile['image_cube_file'],
+                    }
+                }
+                logging.info(f"Job parameters: {params}")
+                msg = json.dumps(params).encode()
+                await publisher.publish(msg)
+
+                # Write entry to database
+                await conn.execute(
+                    "INSERT INTO wallaby.postprocessing \
+                    (name, status, region) \
+                    VALUES ($1, $2, $3) \
+                    ON CONFLICT ON CONSTRAINT postprocessing_name_key \
+                    DO NOTHING;",
+                    run_name, "QUEUED", region
+                )
+                logging.info(f"Adding postprocessing entry with name={run_name} into the WALLABY database.")
+        if not has_left:
+            run_name = f"{tile['identifier']}_l"
+            completed_job = await conn.fetch(
+                "SELECT * FROM wallaby.postprocessing \
+                WHERE (name = $1) AND status = 'COMPLETED'",
+                run_name
+            )
+            if not completed_job:
+                logging.info(f"Processing left outer region for tile {tile['identifier']}")
+                ra_centre = float(tile['ra']) - 3.0
+                dec_centre = float(tile['dec'])
+                region = region_from_tile_centre(ra_centre, dec_centre)
+                params = {
+                    'username': 'ashen',
+                    'pipeline_key': pipeline_key,
+                    'params': {
+                        "RUN_NAME": run_name,
+                        "REGION": region,
+                        "IMAGE_CUBE": tile['image_cube_file'],
+                    }
+                }
+                logging.info(f"Job parameters: {params}")
+                msg = json.dumps(params).encode()
+                await publisher.publish(msg)
+
+                # Write entry to database
+                await conn.execute(
+                    "INSERT INTO wallaby.postprocessing \
+                    (name, status, region) \
+                    VALUES ($1, $2, $3) \
+                    ON CONFLICT ON CONSTRAINT postprocessing_name_key \
+                    DO NOTHING;",
+                    run_name, "QUEUED", region
+                )
+                logging.info(f"Adding postprocessing entry with name={run_name} into the WALLABY database.")
+        if not has_right:
+            run_name = f"{tile['identifier']}_r"
+            completed_job = await conn.fetch(
+                "SELECT * FROM wallaby.postprocessing \
+                WHERE (name = $1) AND status = 'COMPLETED'",
+                run_name
+            )
+            if not completed_job:
+                logging.info(f"Processing right outer region for tile {tile['identifier']}")
+                ra_centre = float(tile['ra']) + 3.0
+                dec_centre = float(tile['dec'])
+                region = region_from_tile_centre(ra_centre, dec_centre)
                 params = {
                     'username': 'ashen',
                     'pipeline_key': pipeline_key,
@@ -362,7 +458,7 @@ async def process_observations(loop):
 
         # 3. Process outer regions of tiles
         logging.info("Processing outer regions of tiles with no adjacent tiles")
-        await outer_regions(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
+        await outer_region_single_tile(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
         
         return
     except Exception as e:

@@ -1,6 +1,11 @@
 # WALLABY events
 
-Collection of publisher/subscriber code that runs on the AusSRC event system to automate the post-processing for the WALLABY survey.d
+Collection of publisher/subscriber code that runs on the AusSRC event system to automate the post-processing for the WALLABY survey.
+
+Includes:
+
+- `postprocessing.py` - submit jobs periodically
+- `on_state_change.py` - updates job states (long-running)
 
 ## CASDA subscriber
 
