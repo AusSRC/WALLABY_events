@@ -357,7 +357,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
             )
             if not completed_job:
                 logging.info(f"Processing left outer region for tile {tile['identifier']}")
-                ra_centre = float(tile['ra']) - 3.0
+                ra_centre = float(tile['ra']) + 3.0
                 dec_centre = float(tile['dec'])
                 region = region_from_tile_centre(ra_centre, dec_centre)
                 params = {
@@ -392,7 +392,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
             )
             if not completed_job:
                 logging.info(f"Processing right outer region for tile {tile['identifier']}")
-                ra_centre = float(tile['ra']) + 3.0
+                ra_centre = float(tile['ra']) - 3.0
                 dec_centre = float(tile['dec'])
                 region = region_from_tile_centre(ra_centre, dec_centre)
                 params = {
