@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-import sys
-import json
-import asyncio
 from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
 
 
@@ -22,8 +19,8 @@ class WorkflowPublisher(object):
         self.rabbitmq_channel = None
         self.casda_exchange = None
         self.casda_queue = None
-        self.workflow_exchange = None          
-    
+        self.workflow_exchange = None
+
     async def setup(self, loop, r_dsn):
         self.r_dsn = r_dsn
 

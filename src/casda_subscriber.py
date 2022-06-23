@@ -1,28 +1,24 @@
 #!/usr/bin/env python3
 
-import sys
 import json
 import asyncio
 import asyncpg
 import logging
 import fnmatch
+from utils import parse_config
 from aio_pika import connect_robust, IncomingMessage, Message, ExchangeType, DeliveryMode
 
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-streamhdlr = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter(fmt='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
-streamhdlr.setFormatter(formatter)
-logger.addHandler(streamhdlr)
+logging.basicConfig(level=logging.INFO)
 
 
 CASDA_EXCHANGE = 'aussrc.casda'
 CASDA_QUEUE = 'aussrc.casda.wallaby'
 WALLABY_WORKFLOW_EXCHANGE = 'aussrc.workflow.submit'
+WALLABY_PROJECT_CODE = 'AS102'
 
 
-class Subscriber(object):
+class CASDASubscriber(object):
     def __init__(self):
         self.project_code = None
         self.db_dsn = None
@@ -39,7 +35,7 @@ class Subscriber(object):
         queues for messaging.
 
         """
-        logger.info("Initialising WALLABY CASDA subscriber.")
+        logging.info("Initialising WALLABY CASDA subscriber.")
         self.project_code = project_code
         self.key = key
 
@@ -64,7 +60,7 @@ class Subscriber(object):
 
         # WALLABY database PostgreSQL connection
         self.db_pool = await asyncpg.create_pool(dsn=None, **db_dsn)
-        logger.info("WALLABY CASDA subscriber successfully initialised.")
+        logging.info("WALLABY CASDA subscriber successfully initialised.")
 
     async def on_message(self, message: IncomingMessage):
         """Callback receiving message on WALLABY queue.
@@ -74,7 +70,7 @@ class Subscriber(object):
         try:
             body = json.loads(message.body)
             if body['project_code'] == self.project_code:
-                logger.info("Received WALLABY observation.")
+                logging.info("Received WALLABY observation.")
                 files = body['files']
                 sbid = body['sbid']
                 image_cube = fnmatch.filter(files, "image.restored.i.*.cube.contsub.fits")
@@ -111,7 +107,7 @@ class Subscriber(object):
             await message.ack()
 
         except Exception:
-            logger.error("on_message", exc_info=True)
+            logging.error("on_message", exc_info=True)
             message.nack()
             await asyncio.sleep(5)
             if self.db_pool:
@@ -120,3 +116,21 @@ class Subscriber(object):
 
     async def consume(self):
         await self.casda_queue.consume(self.on_message, no_ack=False)
+
+
+async def main(loop):
+    """Listen for CASDA event updates
+
+    """
+    db_dsn, r_dsn, pipeline = parse_config()
+
+    # Initialise subscriber
+    subscriber = CASDASubscriber()
+    await subscriber.setup(loop, db_dsn, r_dsn['dsn'], pipeline['key'], WALLABY_PROJECT_CODE)
+    await subscriber.consume()
+
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.create_task(main(loop))
+    loop.run_forever()

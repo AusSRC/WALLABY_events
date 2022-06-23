@@ -5,4 +5,4 @@ services:
     container_name: job_state_subscriber
     entrypoint: /app/job_state_subscriber.py
     volumes:
-      - ./config.ini:/app/config.ini
+      - ./src/config.ini:/app/config.ini
