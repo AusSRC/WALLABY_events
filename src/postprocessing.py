@@ -63,7 +63,7 @@ def get_adjacent_tiles(tiles):
     Returns pairs as list of indices for database query result list.
 
     """
-    # TODO(austin): Get this from somewhere else (imported constants?)
+    # TODO(austin): Thresholds in a single location as constants
     ra_threshold = 7.0
     decimal = 1
     pairs = []
@@ -85,13 +85,14 @@ def get_adjacent_tiles(tiles):
                 pairs.append((i, j))
     return pairs
 
+# TODO(austin): get the constants here right...
 def adjacent_above(c_incoming, c_compare):
     """Check if input tile centre is above a comparison tile centre
     
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
-    if (dec_c > dec_i) & (dec_c < dec_i + math.radians(7.0)) & (ra_i > ra_c - math.radians(6.)) & (ra_i < ra_c + math.radians(6.)):
+    if (dec_c > dec_i) & (dec_c < dec_i + math.radians(7.0)) & (ra_i > ra_c - math.radians(4.)) & (ra_i < ra_c + math.radians(4.)):
         return True
     return False
 
@@ -101,7 +102,7 @@ def adjacent_below(c_incoming, c_compare):
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
-    if (dec_c < dec_i) & (dec_c > dec_i - math.radians(7.0)) & (ra_i > ra_c - math.radians(6.)) & (ra_i < ra_c + math.radians(6.)):
+    if (dec_c < dec_i) & (dec_c > dec_i - math.radians(7.0)) & (ra_i > ra_c - math.radians(4.)) & (ra_i < ra_c + math.radians(4.)):
         return True
     return False
 
@@ -111,8 +112,7 @@ def adjacent_left(c_incoming, c_compare):
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
-    # TODO(austin): smaller RA is left?
-    if (ra_i < ra_c) & (ra_i > ra_c - math.radians(7.0)) & (dec_i > dec_c - math.radians(6.)) & (dec_i < dec_c + math.radians(6.)):
+    if (ra_i < ra_c) & (ra_i > ra_c - math.radians(7.0)) & (dec_i > dec_c - math.radians(4.)) & (dec_i < dec_c + math.radians(4.)):
         return True
     return False
 
@@ -122,8 +122,7 @@ def adjacent_right(c_incoming, c_compare):
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
-    # TODO(austin): smaller RA is left?
-    if (ra_i > ra_c) & (ra_i < ra_c + math.radians(7.0)) & (dec_i > dec_c - math.radians(6.)) & (dec_i < dec_c + math.radians(6.)):
+    if (ra_i > ra_c) & (ra_i < ra_c + math.radians(7.0)) & (dec_i > dec_c - math.radians(4.)) & (dec_i < dec_c + math.radians(4.)):
         return True
     return False
 
