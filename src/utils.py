@@ -16,7 +16,7 @@ def parse_config():
 
 def generate_tile_uuid(ra, dec):
     """Function to generate the WALLABY tile UUID from RA and Dec.
-    
+
     """
     return f"{str(int(round(ra))).rjust(3, '0')}{'+' if dec >= 0 else '-'}{str(int(abs(round(dec)))).rjust(2, '0')}"
 
