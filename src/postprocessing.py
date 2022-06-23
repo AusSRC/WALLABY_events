@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
-import sys
 import logging
 import math
 import json
 import asyncio
 import asyncpg
-import datetime
 import numpy as np
 
 from utils import parse_config, generate_tile_uuid, region_from_tile_centre
@@ -19,10 +17,10 @@ logging.basicConfig(level=logging.INFO)
 def get_footprint_pairs(observations, distance_threshold=0.7):
     """Method for fetching pairs of footprints from observations in the WALLABY database.
     TODO(austin): are the RA and Dec values for beam 0 or the centre of the footprint?
-    
+
     """
     N = len(observations)
-        
+
     # calculate distance between points
     coord_array = np.array([[float(r['ra']), float(r['dec'])] for r in observations])
     distance_matrix = np.zeros((N, N))
@@ -41,10 +39,11 @@ def get_footprint_pairs(observations, distance_threshold=0.7):
 
     return footprint_pairs
 
+
 def add_footprints_to_tiles(observations, pairs):
     """Method for cross matching pairs of observations with pre-filled tiles.
     TODO(austin): Current method cannot distinguish between footprint A and B
-    
+
     """
     # get central RA and Dec for pair
     match = []
@@ -57,6 +56,7 @@ def add_footprints_to_tiles(observations, pairs):
         uuid = generate_tile_uuid(ra_centre, dec_centre)
         match.append((A_id, B_id, uuid))
     return match
+
 
 def get_adjacent_tiles(tiles):
     """Find adjacent tiles in declination bands to process.
@@ -76,7 +76,7 @@ def get_adjacent_tiles(tiles):
             dec_A = round(float(tiles[i]['dec']), decimal)
             ra_B = round(float(tiles[j]['ra']), decimal)
             dec_B = round(float(tiles[j]['dec']), decimal)
-            
+
             # Logic for determining if tiles are adjacent
             # TODO(austin): Flip ra and dec in this logic for full survey
             # if (dec_A == dec_B) and (abs(ra_A - ra_B) < ra_threshold):
@@ -85,10 +85,11 @@ def get_adjacent_tiles(tiles):
                 pairs.append((i, j))
     return pairs
 
-# TODO(austin): get the constants here right...
+
+# TODO(austin): constants to named variables.
 def adjacent_above(c_incoming, c_compare):
     """Check if input tile centre is above a comparison tile centre
-    
+
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
@@ -96,9 +97,10 @@ def adjacent_above(c_incoming, c_compare):
         return True
     return False
 
+
 def adjacent_below(c_incoming, c_compare):
     """Check if input tile centre is below a comparison tile centre
-    
+
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
@@ -106,9 +108,10 @@ def adjacent_below(c_incoming, c_compare):
         return True
     return False
 
+
 def adjacent_left(c_incoming, c_compare):
     """Check if input tile centre is to the left of a comparison tile centre
-    
+
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
@@ -116,15 +119,17 @@ def adjacent_left(c_incoming, c_compare):
         return True
     return False
 
+
 def adjacent_right(c_incoming, c_compare):
     """Check if input tile centre is to the right of a comparison tile centre
-    
+
     """
     ra_i, dec_i = c_incoming
     ra_c, dec_c = c_compare
     if (ra_i > ra_c) & (ra_i < ra_c + math.radians(7.0)) & (dec_i > dec_c - math.radians(4.)) & (dec_i < dec_c + math.radians(4.)):
         return True
     return False
+
 
 async def centre_regions(conn, publisher, pipeline_key, res):
     """Identify centre regions from observations.
@@ -418,10 +423,9 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
                 )
                 logging.info(f"Adding postprocessing entry with name={run_name} into the WALLABY database.")
 
+
 async def process_observations(loop):
     """Run post-processing pipeline on observations as they become avaialable in the database.
-    2. Process central regions
-    3. Process declination band regions
     
     """
     PHASE = "Pilot 2"
@@ -433,7 +437,7 @@ async def process_observations(loop):
         publisher = WorkflowPublisher()
         await publisher.setup(loop, r_dsn['dsn'])
 
-        # 1. Processing centre regions of tiles
+        # 1. Processing centre regions of tiles (Region 1)
         logging.info("Processing centre regions of tiles")
         obs_res = await conn.fetch(
             f"SELECT * FROM wallaby.observation \
@@ -445,7 +449,7 @@ async def process_observations(loop):
             logging.info(f"Observation: {obs}")
         await centre_regions(conn, publisher, workflow_keys['postprocessing_key'], obs_res)
 
-        # 2. Process adjacent tiles in declination bands
+        # 2. Process adjacent tiles in declination bands (Region 3)
         logging.info("Processing adjacent tiles in declination bands")
         tile_res = await conn.fetch(
             f"SELECT * FROM wallaby.tile WHERE phase = '{PHASE}' AND image_cube_file IS NOT NULL"
@@ -455,16 +459,17 @@ async def process_observations(loop):
             logging.info(f"Tile: {t}")
         await declination_band(conn, publisher, workflow_keys['postprocessing_key'], tile_res)
 
-        # 3. Process outer regions of tiles
+        # 3. Process outer regions of tiles (Region 4)
         logging.info("Processing outer regions of tiles with no adjacent tiles")
         await outer_region_single_tile(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
-        
+
         return
-    except Exception as e:
+    except Exception:
         raise
     finally:
         if conn:
             await conn.close()
+
 
 async def _repeat(loop):
     """Run process_centre_regions periodically
