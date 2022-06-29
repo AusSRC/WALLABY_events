@@ -17,12 +17,8 @@ examples.
 
 import os
 import math
-import logging
 import numpy as np
 from astropy.coordinates import angular_separation
-
-
-logging.basicConfig(level=logging.INFO)
 
 
 LOGIC_DECIMAL = os.getenv('LOGIC_DECIMAL', 1)
@@ -82,20 +78,11 @@ def get_adjacent_tiles(tiles):
             # Adjacent in RA bands
             if (abs(ra_A - ra_B) < LOGIC_ADJACENT_MIN_THRESHOLD) and \
                (abs(dec_A - dec_B) < LOGIC_ADJACENT_MAX_THRESHOLD):
-                # TODO(austin): pull logging out of this...
-                logging.info(
-                    f'Found adjacent tiles {tiles[i]["identifier"]} and \
-                    {tiles[j]["identifier"]} in right ascension band'
-                )
                 pairs.append((j, i))
 
             # Adjacent in declination bands
             if (abs(ra_A - ra_B) < LOGIC_ADJACENT_MAX_THRESHOLD) and \
                (abs(dec_A - dec_B) < LOGIC_ADJACENT_MIN_THRESHOLD):
-                logging.info(
-                    f'Found adjacent tiles {tiles[i]["identifier"]} and \
-                    {tiles[j]["identifier"]} along declination band'
-                )
                 pairs.append((j, i))
     return pairs
 
@@ -124,7 +111,6 @@ def get_tile_groups(tiles):
     return groups
 
 
-# TODO(austin): constants to named variables.
 def adjacent_above(c_incoming, c_compare):
     """Check if input tile centre is above a comparison tile centre
 

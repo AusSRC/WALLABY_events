@@ -350,7 +350,13 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase
         tile_i = res[i]
         tile_j = res[j]
         tile_k = res[k]
-        name = f"{tile_i['identifier']}_{tile_j['identifier']}_{tile_k['identifier']}"
+        name_i = tile_i['identifier']
+        name_j = tile_j['identifier']
+        name_k = tile_k['identifier']
+        logging.info(
+            f'Found adjacent tiles ({name_i}, {name_j}, {name_k})'
+        )
+        name = f"{name_i}_{name_j}_{name_k}"
         completed_job = await conn.fetch(
             "SELECT * FROM wallaby.postprocessing \
             WHERE (name = $1) AND status = 'COMPLETED'",
@@ -359,7 +365,7 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase
         if not completed_job:
             logging.info(
                 f"Submitting job for region between group of tiles tiles \
-                ({tile_i['identifier']}, {tile_j['identifier']}, {tile_k['identifier']})."
+                ({name_i}, {name_j}, {name_k})."
             )
 
             # Identify region
@@ -396,8 +402,7 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase
             logging.info(f"Adding postprocessing entry with name={name} into the WALLABY database.")
         else:
             logging.info(
-                f"Group region between ({tile_i['identifier']}, {tile_j['identifier']}, \
-                {tile_k['identifier']}) already processed, skipping."
+                f"Group region between ({name_i}, {name_j}, {name_k}) already processed, skipping."
             )
 
 
