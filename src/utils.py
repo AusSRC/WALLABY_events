@@ -1,17 +1,25 @@
+import os
 import configparser
-import optparse
 
 
 def parse_config():
     """Get database credentials from config file.
 
     """
-    args = optparse.OptionParser()
-    args.add_option('-c', dest="config", default="./config.ini")
-    options, arguments = args.parse_args()
+    config_file = os.getenv('CONFIG', './config.ini')
     parser = configparser.ConfigParser()
-    parser.read(options.config)
+    parser.read(config_file)
     return dict(parser['Database']), dict(parser['RabbitMQ']), dict(parser['Pipeline'])
+
+
+def parse_casda_credentials():
+    """Get CASDA account details from configuration file.
+
+    """
+    casda_credentials_file = os.getenv('CASDA_CREDENTIALS_CONFIG', './casda.ini')
+    parser = configparser.ConfigParser()
+    parser.read(casda_credentials_file)
+    return parser['CASDA']
 
 
 def generate_tile_uuid(ra, dec):
