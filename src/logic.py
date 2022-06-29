@@ -82,7 +82,7 @@ def get_adjacent_tiles(tiles):
             # Adjacent in RA bands
             if (abs(ra_A - ra_B) < LOGIC_ADJACENT_MIN_THRESHOLD) and \
                (abs(dec_A - dec_B) < LOGIC_ADJACENT_MAX_THRESHOLD):
-                # TODO(austin): pull logging out of this...    
+                # TODO(austin): pull logging out of this...
                 logging.info(
                     f'Found adjacent tiles {tiles[i]["identifier"]} and \
                     {tiles[j]["identifier"]} in right ascension band'
