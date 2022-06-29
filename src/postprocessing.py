@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import logging
 import math
 import json
@@ -406,6 +407,7 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase
             )
 
 
+# TODO(austin): Message format in logs
 async def process_observations(loop):
     """Run post-processing pipeline on observations as they become avaialable in the database.
 
@@ -419,7 +421,7 @@ async def process_observations(loop):
         publisher = WorkflowPublisher()
         await publisher.setup(loop, r_dsn['dsn'])
 
-        # 1. Processing centre regions of tiles (Region 1)
+        # Region 1
         logging.info("Processing centre regions of tiles")
         obs_res = await conn.fetch(
             f"SELECT * FROM wallaby.observation \
@@ -431,7 +433,7 @@ async def process_observations(loop):
             logging.info(f"Observation: {obs}")
         await centre_regions(conn, publisher, workflow_keys['postprocessing_key'], obs_res)
 
-        # 2. Process adjacent tiles in declination bands (Region 3)
+        # Region 2
         logging.info("Processing adjacent tiles in declination bands")
         tile_res = await conn.fetch(
             f"SELECT * FROM wallaby.tile WHERE phase = '{PHASE}' AND image_cube_file IS NOT NULL"
@@ -441,12 +443,12 @@ async def process_observations(loop):
             logging.info(f"Tile: {t}")
         await declination_band(conn, publisher, workflow_keys['postprocessing_key'], tile_res)
 
-        # 3. Three adjacent tiles
+        # Region 3
         logging.info("Processing region between three adjancent tiles")
         await adjacent_regions_three_tiles(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
 
-        # 4. Process outer regions of tiles (Region 4)
-        logging.info("Processing outer regions of tiles with no adjacent tiles")
+        # Region 4
+        logging.info("Processing outer regions of tiles with no other adjacent tiles")
         await outer_region_single_tile(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
 
         return
@@ -461,8 +463,7 @@ async def _repeat(loop):
     """Run process_centre_regions periodically
 
     """
-    # TODO(austin): Update interval to something meaningful
-    INTERVAL = 500
+    INTERVAL = os.getenv('POSTPROCESSING_INTERAL', 3600)
     while True:
         await process_observations(loop)
         await asyncio.sleep(INTERVAL)
