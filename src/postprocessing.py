@@ -58,7 +58,7 @@ async def centre_regions(conn, publisher, pipeline_key, res):
         await conn.fetch(
             'UPDATE wallaby.tile \
             SET "footprint_A" = $1, "footprint_B" = $2 \
-            WHERE wallaby.tile.identifier = $3',
+            WHERE identifier = $3',
             A_id, B_id, uuid
         )
 

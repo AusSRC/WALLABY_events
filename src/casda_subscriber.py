@@ -5,7 +5,7 @@ import asyncio
 import asyncpg
 import logging
 import fnmatch
-from utils import parse_config
+from utils import parse_config, parse_casda_credentials
 from aio_pika import connect_robust, IncomingMessage, Message, ExchangeType, DeliveryMode
 
 
@@ -20,42 +20,41 @@ WALLABY_PROJECT_CODE = 'AS102'
 
 class CASDASubscriber(object):
     def __init__(self):
-        self.project_code = None
         self.db_dsn = None
         self.db_pool = None
-        self.rabbitmq_conn = None
-        self.rabbitmq_channel = None
+        self.r_conn = None
+        self.r_channel = None
         self.casda_exchange = None
         self.casda_queue = None
         self.workflow_exchange = None
-        self.key = None
+        self.casda_credentials = None
+        self.pipeline_key = None
 
-    async def setup(self, loop, db_dsn, r_dsn, key, project_code='AS102'):
+    async def setup(self, loop, db_dsn, r_dsn, pipeline_key, project_code):
         """Establish psql and rabbitmq connections. Create exchanges and
         queues for messaging.
 
         """
         logging.info("Initialising WALLABY CASDA subscriber.")
-        self.project_code = project_code
-        self.key = key
+        self.pipeline_key = pipeline_key
 
         # RabbitMQ connection and channel
-        self.rabbitmq_conn = await connect_robust(r_dsn, loop=loop)
-        self.rabbitmq_channel = await self.rabbitmq_conn.channel()
-        await self.rabbitmq_channel.set_qos(prefetch_count=1)
+        self.r_conn = await connect_robust(r_dsn, loop=loop)
+        self.r_channel = await self.r_conn.channel()
+        await self.r_channel.set_qos(prefetch_count=1)
 
         # Create RabbitMQ exchanges and queues
-        self.workflow_exchange = await self.rabbitmq_channel.declare_exchange(
+        self.workflow_exchange = await self.r_channel.declare_exchange(
             WALLABY_WORKFLOW_EXCHANGE,
             ExchangeType.DIRECT,
             durable=True
         )
-        self.casda_exchange = await self.rabbitmq_channel.declare_exchange(
+        self.casda_exchange = await self.r_channel.declare_exchange(
             CASDA_EXCHANGE,
             ExchangeType.FANOUT,
             durable=True
         )
-        self.casda_queue = await self.rabbitmq_channel.declare_queue(name=CASDA_QUEUE, durable=True)
+        self.casda_queue = await self.r_channel.declare_queue(name=CASDA_QUEUE, durable=True)
         await self.casda_queue.bind(self.casda_exchange)
 
         # WALLABY database PostgreSQL connection
@@ -69,8 +68,8 @@ class CASDASubscriber(object):
         """
         try:
             body = json.loads(message.body)
-            if body['project_code'] == self.project_code:
-                logging.info("Received WALLABY observation.")
+            if body['project_code'] == WALLABY_PROJECT_CODE:
+                logging.info(f"Received WALLABY observation: {body}")
                 files = body['files']
                 sbid = body['sbid']
                 image_cube = fnmatch.filter(files, "image.restored.i.*.cube.contsub.fits")
@@ -83,7 +82,7 @@ class CASDASubscriber(object):
                 # Submit to workflow
                 # TODO(austin): remove CASDA credentials from here.
                 params = {
-                    'pipeline_key': self.key,
+                    'pipeline_key': self.pipeline_key,
                     'params': {
                         'SBID': sbid,
                         'CASDA_USERNAME': 'austin.shen@csiro.au',
@@ -93,18 +92,18 @@ class CASDASubscriber(object):
                     }
                 }
                 message = Message(json.dumps(params).encode(), delivery_mode=DeliveryMode.PERSISTENT)
-                await self.workflow_exchange.publish(message, routing_key="")
+                # await self.workflow_exchange.publish(message, routing_key="")
 
                 # Add WALLABY observation
-                async with self.db_pool.acquire() as conn:
-                    async with conn.transaction():
-                        await conn.execute(
-                            "INSERT INTO wallaby.observation (sbid, image_cube, weights_cube) "
-                            "VALUES ($1, $2, $3) "
-                            "ON CONFLICT DO NOTHING",
-                            int(sbid), image_cube[0], weights_cube[0]
-                        )
-            await message.ack()
+                # async with self.db_pool.acquire() as conn:
+                #     async with conn.transaction():
+                #         await conn.execute(
+                #             "INSERT INTO wallaby.observation (sbid, image_cube, weights_cube) "
+                #             "VALUES ($1, $2, $3) "
+                #             "ON CONFLICT DO NOTHING",
+                #             int(sbid), image_cube[0], weights_cube[0]
+                #         )
+            # await message.ack()
 
         except Exception:
             logging.error("on_message", exc_info=True)
@@ -117,16 +116,20 @@ class CASDASubscriber(object):
     async def consume(self):
         await self.casda_queue.consume(self.on_message, no_ack=False)
 
+    async def close(self):
+        await self.r_conn.close()
+
 
 async def main(loop):
     """Listen for CASDA event updates
 
     """
     db_dsn, r_dsn, pipeline = parse_config()
+    casda_credentials = parse_casda_credentials()
 
     # Initialise subscriber
     subscriber = CASDASubscriber()
-    await subscriber.setup(loop, db_dsn, r_dsn['dsn'], pipeline['key'], WALLABY_PROJECT_CODE)
+    await subscriber.setup(loop, db_dsn, r_dsn['dsn'], pipeline['footprint_check_key'], WALLABY_PROJECT_CODE)
     await subscriber.consume()
 
 

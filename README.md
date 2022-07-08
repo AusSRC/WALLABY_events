@@ -6,7 +6,7 @@ Collection of publisher/subscriber code and long-running services on the AusSRC 
 
 Identifies when footprints have been observed based on the distance between sky coordinates in RA/Dec. Submits a post-processing pipeline for the two footprints to run on the overlapping region.
 
-![tiling_scheme](figures/wallaby_tiling_scheme.png)
+![tiling_scheme](media/wallaby_tiling_scheme.png)
 
 ## Subscribers
 

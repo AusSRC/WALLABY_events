@@ -4,8 +4,8 @@ import asyncio
 import asyncpg
 import json
 import logging
-from utils import parse_config
 from aio_pika import connect_robust, IncomingMessage, ExchangeType
+from src.utils import parse_config
 
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +46,68 @@ class JobStateSubscriber(object):
         self.db_pool = await asyncpg.create_pool(dsn=None, **db_dsn)
         logging.info("RabbitMQ and database connections setup complete")
 
+    async def _on_postprocessing_pipeline_update(self, body, params):
+        """Actions to trigger based on post-processing pipeline job status change
+
+        """
+        # update database entry and link run on complete
+        if body['state'] == 'COMPLETED':
+            async with self.db_pool.acquire() as conn:
+                async with conn.transaction():
+                    run = await conn.fetchrow(
+                        "SELECT id FROM wallaby.run WHERE name=$1",
+                        params['RUN_NAME']
+                    )
+                    await conn.execute(
+                        "UPDATE wallaby.postprocessing \
+                        SET run_id=$1, status=$2 \
+                        WHERE name=$3",
+                        run['id'], body['state'], params['RUN_NAME']
+                    )
+                    # TODO(austin): update location for wallaby.tile image cube and weights
+            logging.info(f"Postprocessing run {params['RUN_NAME']} completed")
+
+        # action on state update
+        if (body['state'] == 'FAILED') or (body['state'] == 'RUNNING') or (body['state'] == 'CANCELLED'):
+            async with self.db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        "UPDATE wallaby.postprocessing \
+                        SET status=$1 \
+                        WHERE name=$2",
+                        body['state'], params['RUN_NAME']
+                    )
+            logging.info(f"Updated state of run {params['RUN_NAME']} to {body['state']}")
+
+    async def _on_quality_check_pipeline_update(self, body, params):
+        """Actions to trigger based on quality check pipeline jop status update
+
+        """
+        if body['state'] == 'COMPLETED':
+            async with self.db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        "UPDATE wallaby.observation \
+                        SET status=$1 \
+                        WHERE sbid=$2",
+                        body['state'], params['SBID']
+                    )
+            logging.info(f"Observation {params['SBID']} quality check completed")
+
+            # TODO(austin): email relevant users
+
+        # action on state update
+        if (body['state'] == 'FAILED') or (body['state'] == 'RUNNING') or (body['state'] == 'CANCELLED'):
+            async with self.db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        "UPDATE wallaby.observation \
+                        SET status=$1 \
+                        WHERE sbid=$2",
+                        body['state'], params['SBID']
+                    )
+            logging.info(f"Updated state of observation {params['SBID']} to {body['state']}")
+
     async def on_message(self, message: IncomingMessage):
         """Callback function to be triggered on receiving message in response to Slurm event.
 
@@ -55,37 +117,18 @@ class JobStateSubscriber(object):
             params = json.loads(body['params'])
             logging.info(f"Received event update: {body}")
 
-            # action on complete
-            if body['state'] == 'COMPLETED':
-                async with self.db_pool.acquire() as conn:
-                    async with conn.transaction():
-                        run = await conn.fetchrow(
-                            "SELECT id FROM wallaby.run WHERE name=$1",
-                            params['RUN_NAME']
-                        )
-                        await conn.execute(
-                            "UPDATE wallaby.postprocessing \
-                            SET run_id=$1, status=$2 \
-                            WHERE name=$3",
-                            run['id'], body['state'], params['RUN_NAME']
-                        )
-                logging.info(f"Updated state of run {params['RUN_NAME']} to {body['state']}")
+            # postprocessing pipeline
+            if body['repository'] == 'https://github.com/AusSRC/WALLABY_pipeline':
+                await self._on_postprocessing_pipeline_update(body, params)
 
-            # action on state update
-            if (body['state'] == 'FAILED') or (body['state'] == 'RUNNING') or (body['state'] == 'CANCELLED'):
-                async with self.db_pool.acquire() as conn:
-                    async with conn.transaction():
-                        await conn.execute(
-                            "UPDATE wallaby.postprocessing \
-                            SET status=$1 \
-                            WHERE run_name=$2",
-                            body['state'], params['RUN_NAME']
-                        )
-                logging.info(f"Updated state of run {params['RUN_NAME']} to {body['state']}")
+            # quality check pipeline
+            if body['repository'] == 'https://github.com/AusSRC/WALLABY_footprint_check':
+                await self._on_quality_check_pipeline_update(body, params)
+
             await message.ack()
         except Exception:
             logging.error("Error", exc_info=True)
-            message.nack()
+            await message.nack()
             await asyncio.sleep(5)
             if self.db_pool:
                 await self.db_pool.expire_connections()
@@ -93,6 +136,9 @@ class JobStateSubscriber(object):
 
     async def consume(self):
         await self.r_queue.consume(self.on_message, no_ack=False)
+
+    async def close(self):
+        await self.r_conn.close()
 
 
 async def main(loop):

@@ -6,7 +6,7 @@ def parse_config():
     """Get database credentials from config file.
 
     """
-    config_file = os.getenv('CONFIG', './config.ini')
+    config_file = os.getenv('CONFIG', './etc/config.ini')
     parser = configparser.ConfigParser()
     parser.read(config_file)
     return dict(parser['Database']), dict(parser['RabbitMQ']), dict(parser['Pipeline'])
@@ -16,7 +16,7 @@ def parse_casda_credentials():
     """Get CASDA account details from configuration file.
 
     """
-    casda_credentials_file = os.getenv('CASDA_CREDENTIALS_CONFIG', './casda.ini')
+    casda_credentials_file = os.getenv('CASDA_CREDENTIALS_CONFIG', './etc/casda.ini')
     parser = configparser.ConfigParser()
     parser.read(casda_credentials_file)
     return parser['CASDA']
