@@ -370,8 +370,9 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase
             )
 
             # Identify region
-            ra_centre = (float(tile_i['ra']) + float(tile_j['ra']) + float(tile_k['ra'])) / 2.0
-            dec_centre = (float(tile_i['dec']) + float(tile_j['dec']) + float(tile_k['dec'])) / 2.0
+            # TODO(austin): centre calculated incorrectly...
+            ra_centre = ((float(tile_i['ra']) + float(tile_j['ra'])) / 2.0 + float(tile_k['ra'])) / 2.0
+            dec_centre = ((float(tile_i['dec']) + float(tile_j['dec'])) / 2.0 + float(tile_k['dec'])) / 2.0
             region = region_from_tile_centre(ra_centre, dec_centre)
 
             # Submit job
