@@ -30,12 +30,13 @@ class CASDASubscriber(object):
         self.casda_credentials = None
         self.pipeline_key = None
 
-    async def setup(self, loop, db_dsn, r_dsn, pipeline_key, project_code):
+    async def setup(self, loop, db_dsn, r_dsn, casda, pipeline_key, project_code):
         """Establish psql and rabbitmq connections. Create exchanges and
         queues for messaging.
 
         """
         logging.info("Initialising WALLABY CASDA subscriber.")
+        self.casda_credentials = casda
         self.pipeline_key = pipeline_key
 
         # RabbitMQ connection and channel
@@ -85,25 +86,25 @@ class CASDASubscriber(object):
                     'pipeline_key': self.pipeline_key,
                     'params': {
                         'SBID': sbid,
-                        'CASDA_USERNAME': 'austin.shen@csiro.au',
-                        'CASDA_PASSWORD': 'Y*Q2wQb_C4w9s-b37D',
+                        'CASDA_USERNAME': self.casda['username'],
+                        'CASDA_PASSWORD': self.casda['password'],
                         'SOFIA_PARAMETER_FILE': '/group/ja3/ashen/wallaby/pre_runs/sofia.par',
                         'S2P_TEMPLATE': '/group/ja3/ashen/wallaby/pre_runs/s2p_setup.ini'
                     }
                 }
                 message = Message(json.dumps(params).encode(), delivery_mode=DeliveryMode.PERSISTENT)
-                # await self.workflow_exchange.publish(message, routing_key="")
+                await self.workflow_exchange.publish(message, routing_key="")
 
                 # Add WALLABY observation
-                # async with self.db_pool.acquire() as conn:
-                #     async with conn.transaction():
-                #         await conn.execute(
-                #             "INSERT INTO wallaby.observation (sbid, image_cube, weights_cube) "
-                #             "VALUES ($1, $2, $3) "
-                #             "ON CONFLICT DO NOTHING",
-                #             int(sbid), image_cube[0], weights_cube[0]
-                #         )
-            # await message.ack()
+                async with self.db_pool.acquire() as conn:
+                    async with conn.transaction():
+                        await conn.execute(
+                            "INSERT INTO wallaby.observation (sbid, image_cube, weights_cube) "
+                            "VALUES ($1, $2, $3) "
+                            "ON CONFLICT DO NOTHING",
+                            int(sbid), image_cube[0], weights_cube[0]
+                        )
+            await message.ack()
 
         except Exception:
             logging.error("on_message", exc_info=True)
@@ -129,7 +130,14 @@ async def main(loop):
 
     # Initialise subscriber
     subscriber = CASDASubscriber()
-    await subscriber.setup(loop, db_dsn, r_dsn['dsn'], pipeline['footprint_check_key'], WALLABY_PROJECT_CODE)
+    await subscriber.setup(
+        loop,
+        db_dsn,
+        r_dsn['dsn'],
+        casda_credentials,
+        pipeline['quality_check_key'],
+        WALLABY_PROJECT_CODE
+    )
     await subscriber.consume()
 
 

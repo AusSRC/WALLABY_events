@@ -446,7 +446,7 @@ async def process_observations(loop):
 
         # Region 3
         logging.info("Processing region between three adjancent tiles")
-        await adjacent_regions_three_tiles(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
+        await adjacent_regions_three_tiles(conn, publisher, workflow_keys['postprocessing_key'], tile_res, PHASE)
 
         # Region 4
         logging.info("Processing outer regions of tiles with no other adjacent tiles")
