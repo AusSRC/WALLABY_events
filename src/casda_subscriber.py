@@ -5,8 +5,8 @@ import asyncio
 import asyncpg
 import logging
 import fnmatch
-from utils import parse_config, parse_casda_credentials
 from aio_pika import connect_robust, IncomingMessage, Message, ExchangeType, DeliveryMode
+from src.utils import parse_config, parse_casda_credentials
 
 
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +73,8 @@ class CASDASubscriber(object):
                 logging.info(f"Received WALLABY observation: {body}")
                 files = body['files']
                 sbid = body['sbid']
+                ra = body['ra']
+                dec = body['dec']
                 image_cube = fnmatch.filter(files, "image.restored.i.*.cube.contsub.fits")
                 weights_cube = fnmatch.filter(files, "weights.i.*.cube.fits")
 
@@ -81,13 +83,12 @@ class CASDASubscriber(object):
                     raise Exception("Found more than one image or weights cube for a given SBID.")
 
                 # Submit to workflow
-                # TODO(austin): remove CASDA credentials from here.
                 params = {
                     'pipeline_key': self.pipeline_key,
                     'params': {
                         'SBID': sbid,
-                        'CASDA_USERNAME': self.casda['username'],
-                        'CASDA_PASSWORD': self.casda['password'],
+                        'CASDA_USERNAME': self.casda_credentials['username'],
+                        'CASDA_PASSWORD': self.casda_credentials['password'],
                         'SOFIA_PARAMETER_FILE': '/group/ja3/ashen/wallaby/pre_runs/sofia.par',
                         'S2P_TEMPLATE': '/group/ja3/ashen/wallaby/pre_runs/s2p_setup.ini'
                     }
@@ -99,10 +100,10 @@ class CASDASubscriber(object):
                 async with self.db_pool.acquire() as conn:
                     async with conn.transaction():
                         await conn.execute(
-                            "INSERT INTO wallaby.observation (sbid, image_cube, weights_cube) "
-                            "VALUES ($1, $2, $3) "
+                            "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) "
+                            "VALUES ($1, $2, $3, $4, $5) "
                             "ON CONFLICT DO NOTHING",
-                            int(sbid), image_cube[0], weights_cube[0]
+                            int(sbid), float(ra), float(dec), image_cube[0], weights_cube[0]
                         )
             await message.ack()
 
@@ -118,6 +119,7 @@ class CASDASubscriber(object):
         await self.casda_queue.consume(self.on_message, no_ack=False)
 
     async def close(self):
+        await self.db_pool.expire_connections()
         await self.r_conn.close()
 
 
