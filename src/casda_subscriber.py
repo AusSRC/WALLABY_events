@@ -93,8 +93,8 @@ class CASDASubscriber(object):
                         'S2P_TEMPLATE': '/group/ja3/ashen/wallaby/pre_runs/s2p_setup.ini'
                     }
                 }
-                message = Message(json.dumps(params).encode(), delivery_mode=DeliveryMode.PERSISTENT)
-                await self.workflow_exchange.publish(message, routing_key="")
+                msg = Message(json.dumps(params).encode(), delivery_mode=DeliveryMode.PERSISTENT)
+                await self.workflow_exchange.publish(msg, routing_key="")
 
                 # Add WALLABY observation
                 async with self.db_pool.acquire() as conn:
@@ -109,7 +109,7 @@ class CASDASubscriber(object):
 
         except Exception:
             logging.error("on_message", exc_info=True)
-            message.nack()
+            await message.nack()
             await asyncio.sleep(5)
             if self.db_pool:
                 await self.db_pool.expire_connections()

@@ -77,7 +77,6 @@ async def workflow_queue(event_loop, config):
     )
     await queue.bind(exchange, routing_key="")
     yield queue, exchange
-    await queue.purge()
     await conn.close()
 
 
@@ -99,6 +98,30 @@ async def observation_NGC5044_3A(event_loop, casda_queue):
         'files': [
             'image.restored.i.NGC5044_3A_band2.SB31536.cube.contsub.fits',
             'weights.i.NGC5044_3A_band2.SB31536.cube.fits'
+        ]
+    }).encode())
+    await exchange.publish(msg, routing_key="")
+    return SBID
+
+
+@pytest.mark.asyncio
+@pytest.fixture
+async def observation_NGC5044_3B(event_loop, casda_queue):
+    """Submit an event for NGC5044 Tile 3B to the CASDA queue.
+
+    """
+    SBID = 40905
+    _, exchange = casda_queue
+    msg = Message(json.dumps({
+        'sbid': str(SBID),
+        'ra': '204.0645583',
+        'dec': '-16.7290194',
+        'project_code': 'AS102',
+        'project_name': 'ASKAP Pilot Survey for WALLABY',
+        'obs_start': '2022-07-06T04:34:24',
+        'files': [
+            'image.restored.i.NGC5044_3B_band2.SB40905.cube.contsub.fits',
+            'weights.i.NGC5044_3B_band2.SB40905.cube.fits'
         ]
     }).encode())
     await exchange.publish(msg, routing_key="")
@@ -135,8 +158,18 @@ async def test_receive_new_observation(config, event_loop, database_pool, workfl
         assert(row is not None)
 
     # Assert message to workflow queue was received
+    # TODO(assert message content)
     queue, exchange = workflow_queue
     assert(queue.declaration_result.message_count == 1)
-
-    # TODO(assert message content)
     await queue.consume(lambda x: print(x.body.decode('utf-8')))
+    await queue.purge()
+
+
+@pytest.mark.asyncio
+async def test_observation_pairs():
+    """On receiving a two WALLABY observation for da given tile.
+    Both entries should appear in the database and should trigger the first post-processing pipeline.
+    Tests postprocessing.py code.
+
+    """
+    pass

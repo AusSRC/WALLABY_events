@@ -128,7 +128,7 @@ class JobStateSubscriber(object):
             await message.ack()
         except Exception:
             logging.error("Error", exc_info=True)
-            await message.nack()
+            await message.reject()
             await asyncio.sleep(5)
             if self.db_pool:
                 await self.db_pool.expire_connections()
