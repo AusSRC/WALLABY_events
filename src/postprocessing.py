@@ -7,10 +7,10 @@ import json
 import asyncio
 import asyncpg
 
-from utils import parse_config, generate_tile_uuid, region_from_tile_centre
-from logic import get_observation_pairs, get_adjacent_tiles, get_tile_groups, \
+from src.utils import parse_config, generate_tile_uuid, region_from_tile_centre
+from src.logic import get_observation_pairs, get_adjacent_tiles, get_tile_groups, \
                   adjacent_below, adjacent_above, adjacent_right, adjacent_left
-from workflow_publisher import WorkflowPublisher
+from src.workflow_publisher import WorkflowPublisher
 
 
 logging.basicConfig(level=logging.INFO)
@@ -172,10 +172,13 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
     3. If no adjacent on either side, submit a post-processing job for that side of the cube.
 
     """
-    expected_tiles = await conn.fetch(
-        "SELECT * FROM wallaby.tile WHERE phase = $1",
-        phase
-    )
+    if phase is not None:
+        expected_tiles = await conn.fetch(
+            "SELECT * FROM wallaby.tile WHERE phase = $1",
+            phase
+        )
+    else:
+        expected_tiles = await conn.fetch("SELECT * FROM wallaby.tile")
     for tile in res:
         # Compare against all other tiles
         c_i = (math.radians(float(tile['ra'])), math.radians(float(tile['dec'])))
@@ -337,7 +340,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
                 logging.info(f"Adding postprocessing entry with name={run_name} into the WALLABY database.")
 
 
-async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase):
+async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res):
     """Run post-processing pipeline on regions between three adjacent tiles where
     the data is available.
     1. Find adjacent pairs of tiles
@@ -409,13 +412,15 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res, phase
 
 
 # TODO(austin): Message format in logs
-async def process_observations(loop):
-    """Run post-processing pipeline on observations as they become avaialable in the database.
+async def process_observations(loop, phase=None, config=None):
+    """Run post-processing pipeline on observations as they become available in the database.
 
     """
-    PHASE = "Pilot 2"
     conn = None
-    db_dsn, r_dsn, workflow_keys = parse_config()
+    if config is None:
+        db_dsn, r_dsn, workflow_keys = parse_config()
+    else:
+        db_dsn, r_dsn, workflow_keys = config
     try:
         # Set up database and rabbitMQ connections
         conn = await asyncpg.connect(dsn=None, **db_dsn)
@@ -424,11 +429,15 @@ async def process_observations(loop):
 
         # Region 1
         logging.info("Processing centre regions of tiles")
-        obs_res = await conn.fetch(
-            f"SELECT * FROM wallaby.observation \
-            WHERE phase = '{PHASE}' \
-            AND quality = 'PASSED'"
-        )
+        if phase is not None:
+            obs_res = await conn.fetch(
+                "SELECT * FROM wallaby.observation \
+                WHERE phase = $1 \
+                AND quality = 'PASSED'",
+                phase
+            )
+        else:
+            obs_res = await conn.fetch("SELECT * FROM wallaby.observation WHERE quality = 'PASSED'")
         logging.info(f"Found {len(obs_res)} observations in the database")
         for obs in obs_res:
             logging.info(f"Observation: {obs}")
@@ -436,9 +445,13 @@ async def process_observations(loop):
 
         # Region 2
         logging.info("Processing adjacent tiles in declination bands")
-        tile_res = await conn.fetch(
-            f"SELECT * FROM wallaby.tile WHERE phase = '{PHASE}' AND image_cube_file IS NOT NULL"
-        )
+        if phase is not None:
+            tile_res = await conn.fetch(
+                "SELECT * FROM wallaby.tile WHERE phase = $1 AND image_cube_file IS NOT NULL",
+                phase
+            )
+        else:
+            tile_res = await conn.fetch("SELECT * FROM wallaby.tile WHERE image_cube_file IS NOT NULL")
         logging.info(f"Found {len(tile_res)} tiles in the database")
         for t in tile_res:
             logging.info(f"Tile: {t}")
@@ -446,11 +459,15 @@ async def process_observations(loop):
 
         # Region 3
         logging.info("Processing region between three adjancent tiles")
-        await adjacent_regions_three_tiles(conn, publisher, workflow_keys['postprocessing_key'], tile_res, PHASE)
+        await adjacent_regions_three_tiles(conn, publisher, workflow_keys['postprocessing_key'], tile_res)
 
         # Region 4
         logging.info("Processing outer regions of tiles with no other adjacent tiles")
-        await outer_region_single_tile(conn, publisher, workflow_keys['source_finding_key'], tile_res, PHASE)
+        await outer_region_single_tile(conn, publisher, workflow_keys['source_finding_key'], tile_res, phase)
+
+        # Cleanup
+        await publisher.close()
+        await conn.close()
 
         return
     except Exception:

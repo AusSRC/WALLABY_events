@@ -42,3 +42,6 @@ class WorkflowPublisher(object):
         """
         msg = Message(body, delivery_mode=DeliveryMode.PERSISTENT)
         await self.workflow_exchange.publish(msg, routing_key=WALLABY_WORKFLOW_ROUTING_KEY)
+
+    async def close(self):
+        await self.rabbitmq_conn.close()
