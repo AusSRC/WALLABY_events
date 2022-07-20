@@ -103,7 +103,7 @@ async def centre_regions(conn, publisher, pipeline_key, res):
             logging.info(f"Tile {uuid} already processed, skipping.")
 
 
-async def declination_band(conn, publisher, pipeline_key, res):
+async def adjacent_tiles(conn, publisher, pipeline_key, res):
     """Process region between adjacent tiles.
     1. Get pairs of adjacent tiles
     2. Define region between tile pairs
@@ -455,7 +455,7 @@ async def process_observations(loop, phase=None, config=None):
         logging.info(f"Found {len(tile_res)} tiles in the database")
         for t in tile_res:
             logging.info(f"Tile: {t}")
-        await declination_band(conn, publisher, workflow_keys['postprocessing_key'], tile_res)
+        await adjacent_tiles(conn, publisher, workflow_keys['postprocessing_key'], tile_res)
 
         # Region 3
         logging.info("Processing region between three adjancent tiles")

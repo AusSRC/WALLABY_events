@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 SLEEP = 2
 CASDA_EXCHANGE = 'aussrc.casda'
 CASDA_QUEUE = 'aussrc.casda.wallaby'
-WORKFLOW_EXCHANGE = 'aussrc.workflow.submit'
+WORKFLOW_EXCHANGE = 'aussrc.workflow.submit.pull'
 WALLABY_PROJECT_CODE = 'AS102'
 
 
@@ -75,7 +75,7 @@ async def workflow_queue(event_loop, config):
         durable=True
     )
     queue = await channel.declare_queue(
-        name='aussrc.workflow.submit.pull',
+        name='aussrc.workflow.submit',
         durable=True
     )
     yield queue, exchange
@@ -163,23 +163,28 @@ async def test_receive_new_observation(config, event_loop, database_pool, workfl
         assert(row is not None)
 
     # Assert message to workflow queue was received
-    # TODO(assert message content)
     queue, exchange = workflow_queue
     await queue.bind(exchange, routing_key="")
-    await queue.consume(lambda x: print(x.body.decode('utf-8')))
     assert(queue.declaration_result.message_count == 1)
+    msg = await queue.get()
+    print(msg)
+    body = json.loads(msg.body)
+    print(body)
+    assert(body['pipeline_key'] == pipeline['quality_check_key'])
 
 
 @pytest.mark.asyncio
-async def test_observation_pairs(config, event_loop, database_pool, workflow_queue, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
+async def test_process_observation_pairs(config, event_loop, database_pool, workflow_queue, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
     """On receiving a two WALLABY observation for a given tile.
     Both entries should appear in the database and should trigger the first post-processing pipeline.
     Tests postprocessing.py code.
 
     """
+    _, _, pipeline = config
     queue, exchange = workflow_queue
 
     # pass quality check
+    # TODO(austin): generate UUID from observations
     TILE_UUID = '204-17'
     async with database_pool.acquire() as conn:
         A = await conn.fetchrow(
@@ -212,6 +217,23 @@ async def test_observation_pairs(config, event_loop, database_pool, workflow_que
         assert(job is not None)
 
     # assert postprocessing pipeline message published
-    # TODO(austin): assert message content
-    await queue.consume(lambda x: print(x.body.decode('utf-8')))
     assert(queue.declaration_result.message_count == 1)
+    msg = await queue.get()
+    body = json.loads(msg.body)
+    files = f"{body['params']['FOOTPRINTS']}, {body['params']['WEIGHTS']}"
+    assert(body['pipeline_key'] == pipeline['postprocessing_key'])
+    assert(all(f in files for f in observation_NGC5044_3A['files']))
+    assert(all(f in files for f in observation_NGC5044_3B['files']))
+
+    # TODO(austin): database cleanup
+    pass
+
+
+@pytest.mark.asyncio
+async def test_adjacent_tiles():
+    """On adjacent tiles becoming available in the database.
+    Region between tiles should be processed.
+    Tests postprocessing.py code (adjacent_tiles func)
+
+    """
+    queue, exchange = workflow_queue
