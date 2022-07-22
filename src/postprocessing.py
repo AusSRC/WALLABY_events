@@ -61,6 +61,7 @@ async def centre_regions(conn, publisher, pipeline_key, res):
             WHERE identifier = $3',
             A_id, B_id, uuid
         )
+        # TODO(austin): ideally update the tile filename here too.
 
         # See if there is a completed post-processing job for the same tile
         completed_job = await conn.fetch(

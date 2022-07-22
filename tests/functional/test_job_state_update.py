@@ -147,5 +147,9 @@ async def test_receive_job_complete_message(event_loop, config, job_entry, job_c
 
     # Assert database entry updated
     async with database_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM wallaby.postprocessing WHERE name='204-17'")
-        assert(row['status'] == 'COMPLETED')
+        postprocessing = await conn.fetchrow("SELECT * FROM wallaby.postprocessing WHERE name='204-17'")
+        assert(postprocessing['status'] == 'COMPLETED')
+
+        tile = await conn.fetchrow("SELECT * FROM wallaby.tile WHERE identifier='204-17'")
+        assert(tile['image_cube_file'] is not None)
+        assert(tile['weights_cube_file'] is not None)

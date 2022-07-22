@@ -114,6 +114,31 @@ async def casda_subscriber(config, event_loop):
 
 @pytest.mark.asyncio
 @pytest.fixture
+async def tiles(event_loop, database_pool):
+    """Submit tile entries to the database.
+
+    """
+    tiles = [
+        (203.502, -22.368, '204-22', 'NGC5044 Tile 4', 'Pilot 2'),
+        (197.733, -13.378, '198-13', 'NGC5044 Tile 1', 'Pilot 2'),
+        (197.739, -18.775, '198-19', 'NGC5044 Tile 2', 'Pilot 2'),
+        (203.597, -16.739, '204-17', 'NGC5044 Tile 3', 'Pilot 2'),
+        (195.132, 5.773, '195+06', 'NGC4808', 'Pilot 2')
+    ]
+    async with database_pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO wallaby.tile \
+                (ra, dec, identifier, description, phase) \
+            VALUES \
+                ($1, $2, $3, $4, $5) \
+            ON CONFLICT DO NOTHING",
+            tiles
+        )
+    return
+
+
+@pytest.mark.asyncio
+@pytest.fixture
 async def observation_NGC5044_3A(event_loop, casda_queue):
     """Submit an event for NGC5044 Tile 3A to the CASDA queue.
 
@@ -162,7 +187,7 @@ async def observation_NGC5044_3B(event_loop, casda_queue):
 
 # TODO(austin): debug - not passing on first run...
 @pytest.mark.asyncio
-async def test_receive_new_observation(config, event_loop, casda_subscriber, database_pool, workflow_queue, observation_NGC5044_3A):  # noqa
+async def test_receive_new_observation(config, event_loop, database_pool, workflow_queue, casda_subscriber, observation_NGC5044_3A):  # noqa
     """On receiving a new WALLABY observation.
     Entry should appear in the database and trigger the footprint check pipeline.
     Tests behaviour of the casda_subscriber.py code.
@@ -179,14 +204,14 @@ async def test_receive_new_observation(config, event_loop, casda_subscriber, dat
         assert(row is not None)
 
     # Assert message to workflow queue was received
-    queue, exchange = workflow_queue
+    queue, _ = workflow_queue
     msg = await queue.get()
     body = json.loads(msg.body)
     assert(body['pipeline_key'] == pipeline['quality_check_key'])
 
 
 @pytest.mark.asyncio
-async def test_process_observation_pairs(config, event_loop, casda_subscriber, database_pool, workflow_queue, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
+async def test_process_observation_pairs(config, event_loop, database_pool, casda_subscriber, workflow_queue, tiles, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
     """On receiving a two WALLABY observation for a given tile.
     Both entries should appear in the database and should trigger the first post-processing pipeline.
     Tests postprocessing.py code.
@@ -216,9 +241,17 @@ async def test_process_observation_pairs(config, event_loop, casda_subscriber, d
         )
 
     # run postprocessing
-    queue, exchange = workflow_queue
-    await queue.bind(exchange, routing_key="pipeline")
+    queue, _ = workflow_queue
     await process_observations(event_loop, config=config)
+    await asyncio.sleep(SLEEP)
+
+    # assert tile entry updated
+    async with database_pool.acquire() as conn:
+        tile = await conn.fetchrow(
+            "SELECT * FROM wallaby.tile WHERE identifier = $1",
+            TILE_UUID
+        )
+        assert(tile['footprint_A'] is not None and tile['footprint_B'] is not None)
 
     # assert submit job into database
     async with database_pool.acquire() as conn:
@@ -229,7 +262,6 @@ async def test_process_observation_pairs(config, event_loop, casda_subscriber, d
         assert(job is not None)
 
     # assert each observation message
-    await asyncio.sleep(SLEEP)
     msgA = await queue.get()
     assert(json.loads(msgA.body)['pipeline_key'] == pipeline['quality_check_key'])
     msgB = await queue.get()
@@ -244,14 +276,92 @@ async def test_process_observation_pairs(config, event_loop, casda_subscriber, d
     assert(all(f in files for f in observation_NGC5044_3A['files']))
     assert(all(f in files for f in observation_NGC5044_3B['files']))
 
-    # TODO(austin): database cleanup?
-
 
 @pytest.mark.asyncio
-async def test_adjacent_tiles():
+async def test_adjacent_tiles(config, event_loop, database_pool, workflow_queue, tiles):  # noqa
     """On adjacent tiles becoming available in the database.
     Region between tiles should be processed.
     Tests postprocessing.py code (adjacent_tiles func)
 
     """
-    pass
+    TILE_A_UUID = '204-17'
+    TILE_B_UUID = '204-22'
+
+    obs_A = (25701, 203.2560, -22.144, 'image.restored.i.NGC5044_4A.SB25701.cube.contsub.fits', 'weights.i.NGC5044_4A.SB25701.cube.fits')  # noqa
+    obs_B = (25750, 203.7480, -22.593, 'image.restored.i.NGC5044_4B.SB25750.cube.contsub.fits', 'weights.i.NGC5044_4B.SB25750.cube.fits')  # noqa
+
+    # create necessary observations and tiles
+    async with database_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) \
+            VALUES ($1, $2, $3, $4, $5)\
+            ON CONFLICT DO NOTHING",
+            *obs_A
+        )
+        await conn.execute(
+            "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) \
+            VALUES ($1, $2, $3, $4, $5)\
+            ON CONFLICT DO NOTHING",
+            *obs_B
+        )
+        A = await conn.fetchrow(
+            "SELECT * FROM wallaby.observation WHERE sbid = $1",
+            obs_A[0]
+        )
+        B = await conn.fetchrow(
+            "SELECT * FROM wallaby.observation WHERE sbid = $1",
+            obs_B[0]
+        )
+        await conn.execute(
+            "UPDATE wallaby.tile SET \
+            image_cube_file = 'cube.a.fits', weights_cube_file = 'weights.a.fits' \
+            WHERE identifier = $1",
+            TILE_A_UUID
+        )
+        await conn.execute(
+            "UPDATE wallaby.postprocessing SET status = 'COMPLETED' WHERE name = $1",
+            TILE_A_UUID
+        )
+        await conn.execute(
+            'UPDATE wallaby.tile SET \
+            image_cube_file = \'cube.b.fits\', weights_cube_file = \'weights.b.fits\', \
+            "footprint_A" = $2, "footprint_B" = $3 \
+            WHERE identifier = $1',
+            TILE_B_UUID, A['id'], B['id']
+        )
+
+    # assert tile entry updated
+    async with database_pool.acquire() as conn:
+        tile = await conn.fetchrow(
+            "SELECT * FROM wallaby.tile WHERE identifier = $1",
+            TILE_A_UUID
+        )
+        assert(tile['footprint_A'] is not None and tile['footprint_B'] is not None)
+
+    # run postprocessing
+    await process_observations(event_loop, config=config)
+    await asyncio.sleep(SLEEP)
+
+    # assert postprocessing entry created
+    async with database_pool.acquire() as conn:
+        job = await conn.fetchrow(
+            "SELECT * FROM wallaby.postprocessing WHERE name in ($1, $2)",
+            f"{TILE_A_UUID}_{TILE_B_UUID}", f"{TILE_B_UUID}_{TILE_A_UUID}"
+        )
+        assert(job is not None)
+
+    # assert message published for job submission
+    queue, _ = workflow_queue
+    msg = await queue.get()
+    body = json.loads(msg.body)
+    assert(
+        body['params']['RUN_NAME'] == f"{TILE_A_UUID}_{TILE_B_UUID}" or
+        body['params']['RUN_NAME'] == f"{TILE_B_UUID}_{TILE_A_UUID}"
+    )
+
+    # undo status change
+    async with database_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE wallaby.postprocessing SET status = 'QUEUED' WHERE name = $1",
+            TILE_A_UUID
+        )

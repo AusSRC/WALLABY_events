@@ -63,7 +63,7 @@ async def insert_observations():
                 [(k, v['ra'], v['dec']) for k, v in results_map.items()]
             )
     except Exception as e:
-        raise
+        raise(e)
     finally:
         if conn:
             await conn.close()
