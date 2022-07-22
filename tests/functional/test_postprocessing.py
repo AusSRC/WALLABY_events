@@ -185,7 +185,6 @@ async def observation_NGC5044_3B(event_loop, casda_queue):
     return data
 
 
-# TODO(austin): debug - not passing on first run...
 @pytest.mark.asyncio
 async def test_receive_new_observation(config, event_loop, database_pool, workflow_queue, casda_subscriber, observation_NGC5044_3A):  # noqa
     """On receiving a new WALLABY observation.
@@ -217,6 +216,7 @@ async def test_observation_pairs(config, event_loop, database_pool, casda_subscr
     Tests postprocessing.py code.
 
     """
+    await asyncio.sleep(SLEEP)
     _, _, pipeline = config
 
     # pass quality check
@@ -358,7 +358,6 @@ async def test_incoming_tile(config, event_loop, database_pool, workflow_queue, 
     assert(body['pipeline_key'] == pipeline['postprocessing_key'])
 
     # TODO(austin): assert border regions job submission
-    pass
 
     # undo status change
     async with database_pool.acquire() as conn:
