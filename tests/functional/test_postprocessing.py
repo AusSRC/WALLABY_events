@@ -376,7 +376,6 @@ async def test_tile_group(config, event_loop, database_pool, workflow_queue, til
 
     """
     _, _, pipeline = config
-    # TODO(austin): names for mosaicked tiles not deterministic...
     TILE_2_UUID = '198-19'
     TILE_3_UUID = '204-17'
     TILE_4_UUID = '204-22'
