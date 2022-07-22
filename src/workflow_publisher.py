@@ -3,8 +3,6 @@
 from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
 
 
-CASDA_EXCHANGE = 'aussrc.casda'
-CASDA_QUEUE = 'aussrc.casda.wallaby'
 WALLABY_WORKFLOW_EXCHANGE = 'aussrc.workflow.submit'
 WALLABY_WORKFLOW_ROUTING_KEY = 'pipeline'
 
@@ -14,34 +12,27 @@ class WorkflowPublisher(object):
 
     """
     def __init__(self):
-        self.r_dsn = None
-        self.rabbitmq_conn = None
-        self.rabbitmq_channel = None
-        self.casda_exchange = None
-        self.casda_queue = None
-        self.workflow_exchange = None
+        self.dsn = None
+        self.conn = None
+        self.channel = None
+        self.exchange = None
 
-    async def setup(self, loop, r_dsn):
-        self.r_dsn = r_dsn
+    async def setup(self, loop, dsn):
+        self.dsn = dsn
+        self.conn = await connect_robust(self.dsn, loop=loop)
+        self.channel = await self.conn.channel()
+        await self.channel.set_qos(prefetch_count=1)
 
-        # RabbitMQ connection and channel
-        self.rabbitmq_conn = await connect_robust(self.r_dsn, loop=loop)
-        self.rabbitmq_channel = await self.rabbitmq_conn.channel()
-        await self.rabbitmq_channel.set_qos(prefetch_count=1)
-
-        # Create RabbitMQ exchanges and queues (make sure they exist)
-        self.workflow_exchange = await self.rabbitmq_channel.declare_exchange(
+        # Ensure exchange exists
+        self.exchange = await self.channel.declare_exchange(
             WALLABY_WORKFLOW_EXCHANGE,
             ExchangeType.DIRECT,
             durable=True
         )
 
     async def publish(self, body):
-        """Publish message to workflow exchange.
-
-        """
         msg = Message(body, delivery_mode=DeliveryMode.PERSISTENT)
-        await self.workflow_exchange.publish(msg, routing_key=WALLABY_WORKFLOW_ROUTING_KEY)
+        await self.exchange.publish(msg, routing_key=WALLABY_WORKFLOW_ROUTING_KEY)
 
     async def close(self):
-        await self.rabbitmq_conn.close()
+        await self.conn.close()

@@ -93,8 +93,9 @@ class CASDASubscriber(object):
                         'S2P_TEMPLATE': '/group/ja3/ashen/wallaby/pre_runs/s2p_setup.ini'
                     }
                 }
+                logging.info(f"Publishing message to workflow exchange {params}")
                 msg = Message(json.dumps(params).encode(), delivery_mode=DeliveryMode.PERSISTENT)
-                await self.workflow_exchange.publish(msg, routing_key="")
+                await self.workflow_exchange.publish(msg, routing_key="pipeline")
 
                 # Add WALLABY observation
                 async with self.db_pool.acquire() as conn:
@@ -105,6 +106,7 @@ class CASDASubscriber(object):
                             "ON CONFLICT DO NOTHING",
                             int(sbid), float(ra), float(dec), image_cube[0], weights_cube[0]
                         )
+                        logging.info(f"Updating observation database with entry for SB{int(sbid)}")
             await message.ack()
 
         except Exception:
