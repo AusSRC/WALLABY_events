@@ -86,7 +86,7 @@ async def centre_regions(conn, publisher, pipeline_key, res):
                     "WEIGHTS": f"{res[A_idx]['weights_cube_file']}, {res[B_idx]['weights_cube_file']}"
                 }
             }
-            logging.info(f"Job parameters: {params}")
+            logging.info(f"Submitting job with parameters: {params}")
             msg = json.dumps(params).encode()
             await publisher.publish(msg)
 
@@ -146,7 +146,7 @@ async def adjacent_tiles(conn, publisher, pipeline_key, res):
                     "WEIGHTS": f"{tileA['weights_cube_file']}, {tileB['weights_cube_file']}"
                 }
             }
-            logging.info(f"Job parameters: {params}")
+            logging.info(f"Submitting job with parameters: {params}")
             msg = json.dumps(params).encode()
             await publisher.publish(msg)
 
@@ -220,7 +220,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
                         "IMAGE_CUBE": tile['image_cube_file'],
                     }
                 }
-                logging.info(f"Job parameters: {params}")
+                logging.info(f"Submitting job with parameters: {params}")
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
 
@@ -255,7 +255,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
                         "IMAGE_CUBE": tile['image_cube_file'],
                     }
                 }
-                logging.info(f"Job parameters: {params}")
+                logging.info(f"Submitting job with parameters: {params}")
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
 
@@ -290,7 +290,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
                         "IMAGE_CUBE": tile['image_cube_file'],
                     }
                 }
-                logging.info(f"Job parameters: {params}")
+                logging.info(f"Submitting job with parameters: {params}")
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
 
@@ -325,7 +325,7 @@ async def outer_region_single_tile(conn, publisher, pipeline_key, res, phase):
                         "IMAGE_CUBE": tile['image_cube_file'],
                     }
                 }
-                logging.info(f"Job parameters: {params}")
+                logging.info(f"Submitting job with parameters: {params}")
                 msg = json.dumps(params).encode()
                 await publisher.publish(msg)
 
@@ -392,7 +392,7 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res):
                         f"{tile_i['weights_cube_file']}, {tile_j['weights_cube_file']}, {tile_k['weights_cube_file']}"
                 }
             }
-            logging.info(f"Job parameters: {params}")
+            logging.info(f"Submitting job with parameters: {params}")
             msg = json.dumps(params).encode()
             await publisher.publish(msg)
 

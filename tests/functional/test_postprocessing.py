@@ -119,10 +119,10 @@ async def tiles(event_loop, database_pool):
 
     """
     tiles = [
-        (203.502, -22.368, '204-22', 'NGC5044 Tile 4', 'Pilot 2'),
         (197.733, -13.378, '198-13', 'NGC5044 Tile 1', 'Pilot 2'),
         (197.739, -18.775, '198-19', 'NGC5044 Tile 2', 'Pilot 2'),
         (203.597, -16.739, '204-17', 'NGC5044 Tile 3', 'Pilot 2'),
+        (203.502, -22.368, '204-22', 'NGC5044 Tile 4', 'Pilot 2'),
         (195.132, 5.773, '195+06', 'NGC4808', 'Pilot 2')
     ]
     async with database_pool.acquire() as conn:
@@ -211,7 +211,7 @@ async def test_receive_new_observation(config, event_loop, database_pool, workfl
 
 
 @pytest.mark.asyncio
-async def test_process_observation_pairs(config, event_loop, database_pool, casda_subscriber, workflow_queue, tiles, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
+async def test_observation_pairs(config, event_loop, database_pool, casda_subscriber, workflow_queue, tiles, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
     """On receiving a two WALLABY observation for a given tile.
     Both entries should appear in the database and should trigger the first post-processing pipeline.
     Tests postprocessing.py code.
@@ -220,7 +220,7 @@ async def test_process_observation_pairs(config, event_loop, database_pool, casd
     _, _, pipeline = config
 
     # pass quality check
-    # TODO(austin): generate UUID from observations
+    # TODO(austin): generate UUID from observations in test
     TILE_UUID = '204-17'
     async with database_pool.acquire() as conn:
         A = await conn.fetchrow(
@@ -278,15 +278,14 @@ async def test_process_observation_pairs(config, event_loop, database_pool, casd
 
 
 @pytest.mark.asyncio
-async def test_adjacent_tiles(config, event_loop, database_pool, workflow_queue, tiles):  # noqa
-    """On adjacent tiles becoming available in the database.
-    Region between tiles should be processed.
-    Tests postprocessing.py code (adjacent_tiles func)
+async def test_incoming_tile(config, event_loop, database_pool, workflow_queue, tiles):  # noqa
+    """New incoming tile entry. Expect processing of adjacent region between tiles
+    and border regions on top and bottom where there are no neighbouring tiles.
 
     """
-    TILE_A_UUID = '204-17'
-    TILE_B_UUID = '204-22'
-
+    _, _, pipeline = config
+    TILE_3_UUID = '204-17'
+    TILE_4_UUID = '204-22'
     obs_A = (25701, 203.2560, -22.144, 'image.restored.i.NGC5044_4A.SB25701.cube.contsub.fits', 'weights.i.NGC5044_4A.SB25701.cube.fits')  # noqa
     obs_B = (25750, 203.7480, -22.593, 'image.restored.i.NGC5044_4B.SB25750.cube.contsub.fits', 'weights.i.NGC5044_4B.SB25750.cube.fits')  # noqa
 
@@ -294,13 +293,13 @@ async def test_adjacent_tiles(config, event_loop, database_pool, workflow_queue,
     async with database_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) \
-            VALUES ($1, $2, $3, $4, $5)\
+            VALUES ($1, $2, $3, $4, $5) \
             ON CONFLICT DO NOTHING",
             *obs_A
         )
         await conn.execute(
             "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) \
-            VALUES ($1, $2, $3, $4, $5)\
+            VALUES ($1, $2, $3, $4, $5) \
             ON CONFLICT DO NOTHING",
             *obs_B
         )
@@ -316,52 +315,135 @@ async def test_adjacent_tiles(config, event_loop, database_pool, workflow_queue,
             "UPDATE wallaby.tile SET \
             image_cube_file = 'cube.a.fits', weights_cube_file = 'weights.a.fits' \
             WHERE identifier = $1",
-            TILE_A_UUID
-        )
-        await conn.execute(
-            "UPDATE wallaby.postprocessing SET status = 'COMPLETED' WHERE name = $1",
-            TILE_A_UUID
+            TILE_3_UUID
         )
         await conn.execute(
             'UPDATE wallaby.tile SET \
             image_cube_file = \'cube.b.fits\', weights_cube_file = \'weights.b.fits\', \
             "footprint_A" = $2, "footprint_B" = $3 \
             WHERE identifier = $1',
-            TILE_B_UUID, A['id'], B['id']
+            TILE_4_UUID, A['id'], B['id']
+        )
+        await conn.execute(
+            "UPDATE wallaby.postprocessing SET status = 'COMPLETED' WHERE name = $1",
+            TILE_3_UUID
         )
 
     # assert tile entry updated
     async with database_pool.acquire() as conn:
         tile = await conn.fetchrow(
             "SELECT * FROM wallaby.tile WHERE identifier = $1",
-            TILE_A_UUID
+            TILE_3_UUID
         )
         assert(tile['footprint_A'] is not None and tile['footprint_B'] is not None)
 
     # run postprocessing
+    queue, _ = workflow_queue
     await process_observations(event_loop, config=config)
     await asyncio.sleep(SLEEP)
 
     # assert postprocessing entry created
     async with database_pool.acquire() as conn:
         job = await conn.fetchrow(
-            "SELECT * FROM wallaby.postprocessing WHERE name in ($1, $2)",
-            f"{TILE_A_UUID}_{TILE_B_UUID}", f"{TILE_B_UUID}_{TILE_A_UUID}"
+            "SELECT * FROM wallaby.postprocessing WHERE name = $1",
+            f"{TILE_4_UUID}_{TILE_3_UUID}"
         )
         assert(job is not None)
 
-    # assert message published for job submission
-    queue, _ = workflow_queue
+    # assert adjacent region job submission
     msg = await queue.get()
     body = json.loads(msg.body)
-    assert(
-        body['params']['RUN_NAME'] == f"{TILE_A_UUID}_{TILE_B_UUID}" or
-        body['params']['RUN_NAME'] == f"{TILE_B_UUID}_{TILE_A_UUID}"
-    )
+    assert(f"{TILE_4_UUID}_{TILE_3_UUID}" == body['params']['RUN_NAME'])
+    assert(body['pipeline_key'] == pipeline['postprocessing_key'])
+
+    # TODO(austin): assert border regions job submission
+    pass
 
     # undo status change
     async with database_pool.acquire() as conn:
         await conn.execute(
             "UPDATE wallaby.postprocessing SET status = 'QUEUED' WHERE name = $1",
-            TILE_A_UUID
+            TILE_3_UUID
+        )
+
+
+@pytest.mark.asyncio
+async def test_tile_group(config, event_loop, database_pool, workflow_queue, tiles):  # noqa
+    """Test new incoming tile forming a group.
+    Should process region between three tiles and additonal boundary regions for the
+    new tile.
+
+    """
+    _, _, pipeline = config
+    # TODO(austin): names for mosaicked tiles not deterministic...
+    TILE_2_UUID = '198-19'
+    TILE_3_UUID = '204-17'
+    TILE_4_UUID = '204-22'
+    obs_A = (34166, 197.500, -18.550, 'image.restored.i.NGC5044_2A.SB34166.cube.contsub.fits', 'weights.i.NGC5044_2A.SB34166.cube.fits')  # noqa
+    obs_B = (34275, 197.979, -18.999, 'image.restored.i.NGC5044_2B.SB34275.cube.contsub.fits', 'weights.i.NGC5044_2B.SB34275.cube.fits')  # noqa
+
+    # create necessary observations and tiles
+    async with database_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) \
+            VALUES ($1, $2, $3, $4, $5) \
+            ON CONFLICT DO NOTHING",
+            *obs_A
+        )
+        await conn.execute(
+            "INSERT INTO wallaby.observation (sbid, ra, dec, image_cube_file, weights_cube_file) \
+            VALUES ($1, $2, $3, $4, $5) \
+            ON CONFLICT DO NOTHING",
+            *obs_B
+        )
+        A = await conn.fetchrow(
+            "SELECT * FROM wallaby.observation WHERE sbid = $1",
+            obs_A[0]
+        )
+        B = await conn.fetchrow(
+            "SELECT * FROM wallaby.observation WHERE sbid = $1",
+            obs_B[0]
+        )
+        await conn.execute(
+            "UPDATE wallaby.tile SET \
+            image_cube_file = 'cube.c.fits', weights_cube_file = 'weights.c.fits' \
+            WHERE identifier = $1",
+            TILE_2_UUID
+        )
+        await conn.execute(
+            'UPDATE wallaby.tile SET \
+            image_cube_file = \'cube.c.fits\', weights_cube_file = \'weights.c.fits\', \
+            "footprint_A" = $2, "footprint_B" = $3 \
+            WHERE identifier = $1',
+            TILE_2_UUID, A['id'], B['id']
+        )
+        await conn.execute(
+            "UPDATE wallaby.postprocessing SET status = 'COMPLETED' WHERE name IN ($1, $2, $3, $4)",
+            TILE_3_UUID, TILE_4_UUID, f"{TILE_4_UUID}_{TILE_3_UUID}", f"{TILE_3_UUID}_{TILE_4_UUID}"
+        )
+
+    # run postprocessing
+    queue, _ = workflow_queue
+    await process_observations(event_loop, config=config)
+    await asyncio.sleep(SLEEP)
+
+    # assert postprocessing job submitted
+    async with database_pool.acquire() as conn:
+        job = await conn.fetchrow(
+            "SELECT * FROM wallaby.postprocessing WHERE name = $1",
+            f"{TILE_4_UUID}_{TILE_3_UUID}_{TILE_2_UUID}"
+        )
+        assert(job is not None)
+
+    # assert messages published
+    msg = await queue.get()
+    body = json.loads(msg.body)
+    assert(f"{TILE_4_UUID}_{TILE_3_UUID}_{TILE_2_UUID}" == body['params']['RUN_NAME'])
+    assert(body['pipeline_key'] == pipeline['postprocessing_key'])
+
+    # undo status change
+    async with database_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE wallaby.postprocessing SET status = 'QUEUED' WHERE name IN ($1, $2, $3, $4)",
+            TILE_3_UUID, TILE_4_UUID, f"{TILE_4_UUID}_{TILE_3_UUID}", f"{TILE_3_UUID}_{TILE_4_UUID}"
         )

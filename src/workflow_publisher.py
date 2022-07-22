@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
-import logging
 from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
 
 
-logging.basicConfig(level=logging.INFO)
 WALLABY_WORKFLOW_EXCHANGE = 'aussrc.workflow.submit'
 WALLABY_WORKFLOW_ROUTING_KEY = 'pipeline'
 
@@ -34,7 +32,6 @@ class WorkflowPublisher(object):
 
     async def publish(self, body):
         msg = Message(body, delivery_mode=DeliveryMode.PERSISTENT)
-        logging.info(f"Workflow publisher delivering message {body}")
         await self.exchange.publish(msg, routing_key=WALLABY_WORKFLOW_ROUTING_KEY)
 
     async def close(self):
