@@ -18,7 +18,7 @@ import asyncio
 import asyncpg
 import logging
 from aio_pika import connect_robust, ExchangeType, Message
-from src.utils import parse_config, parse_casda_credentials
+from src.utils import parse_config, parse_casda_credentials, tile_mosaic_name
 from src.casda_subscriber import CASDASubscriber
 from src.postprocessing import process_observations
 
@@ -286,6 +286,7 @@ async def test_incoming_tile(config, event_loop, database_pool, workflow_queue, 
     _, _, pipeline = config
     TILE_3_UUID = '204-17'
     TILE_4_UUID = '204-22'
+    name = tile_mosaic_name([TILE_3_UUID, TILE_4_UUID])
     obs_A = (25701, 203.2560, -22.144, 'image.restored.i.NGC5044_4A.SB25701.cube.contsub.fits', 'weights.i.NGC5044_4A.SB25701.cube.fits')  # noqa
     obs_B = (25750, 203.7480, -22.593, 'image.restored.i.NGC5044_4B.SB25750.cube.contsub.fits', 'weights.i.NGC5044_4B.SB25750.cube.fits')  # noqa
 
@@ -346,14 +347,14 @@ async def test_incoming_tile(config, event_loop, database_pool, workflow_queue, 
     async with database_pool.acquire() as conn:
         job = await conn.fetchrow(
             "SELECT * FROM wallaby.postprocessing WHERE name = $1",
-            f"{TILE_4_UUID}_{TILE_3_UUID}"
+            name
         )
         assert(job is not None)
 
     # assert adjacent region job submission
     msg = await queue.get()
     body = json.loads(msg.body)
-    assert(f"{TILE_4_UUID}_{TILE_3_UUID}" == body['params']['RUN_NAME'])
+    assert(name == body['params']['RUN_NAME'])
     assert(body['pipeline_key'] == pipeline['postprocessing_key'])
 
     # TODO(austin): assert border regions job submission
@@ -379,6 +380,7 @@ async def test_tile_group(config, event_loop, database_pool, workflow_queue, til
     TILE_2_UUID = '198-19'
     TILE_3_UUID = '204-17'
     TILE_4_UUID = '204-22'
+    name = tile_mosaic_name([TILE_2_UUID, TILE_3_UUID, TILE_4_UUID])
     obs_A = (34166, 197.500, -18.550, 'image.restored.i.NGC5044_2A.SB34166.cube.contsub.fits', 'weights.i.NGC5044_2A.SB34166.cube.fits')  # noqa
     obs_B = (34275, 197.979, -18.999, 'image.restored.i.NGC5044_2B.SB34275.cube.contsub.fits', 'weights.i.NGC5044_2B.SB34275.cube.fits')  # noqa
 
@@ -418,8 +420,8 @@ async def test_tile_group(config, event_loop, database_pool, workflow_queue, til
             TILE_2_UUID, A['id'], B['id']
         )
         await conn.execute(
-            "UPDATE wallaby.postprocessing SET status = 'COMPLETED' WHERE name IN ($1, $2, $3, $4)",
-            TILE_3_UUID, TILE_4_UUID, f"{TILE_4_UUID}_{TILE_3_UUID}", f"{TILE_3_UUID}_{TILE_4_UUID}"
+            "UPDATE wallaby.postprocessing SET status = 'COMPLETED' WHERE name IN ($1, $2, $3)",
+            TILE_3_UUID, TILE_4_UUID, tile_mosaic_name([TILE_3_UUID, TILE_4_UUID])
         )
 
     # run postprocessing
@@ -431,19 +433,19 @@ async def test_tile_group(config, event_loop, database_pool, workflow_queue, til
     async with database_pool.acquire() as conn:
         job = await conn.fetchrow(
             "SELECT * FROM wallaby.postprocessing WHERE name = $1",
-            f"{TILE_4_UUID}_{TILE_3_UUID}_{TILE_2_UUID}"
+            name
         )
         assert(job is not None)
 
     # assert messages published
     msg = await queue.get()
     body = json.loads(msg.body)
-    assert(f"{TILE_4_UUID}_{TILE_3_UUID}_{TILE_2_UUID}" == body['params']['RUN_NAME'])
+    assert(name == body['params']['RUN_NAME'])
     assert(body['pipeline_key'] == pipeline['postprocessing_key'])
 
     # undo status change
     async with database_pool.acquire() as conn:
         await conn.execute(
-            "UPDATE wallaby.postprocessing SET status = 'QUEUED' WHERE name IN ($1, $2, $3, $4)",
-            TILE_3_UUID, TILE_4_UUID, f"{TILE_4_UUID}_{TILE_3_UUID}", f"{TILE_3_UUID}_{TILE_4_UUID}"
+            "UPDATE wallaby.postprocessing SET status = 'QUEUED' WHERE name IN ($1, $2, $3)",
+            TILE_3_UUID, TILE_4_UUID, tile_mosaic_name([TILE_3_UUID, TILE_4_UUID])
         )

@@ -17,7 +17,7 @@ def parse_casda_credentials(cred_file=None):
     """Get CASDA account details from configuration file.
 
     """
-    if cred_file is None: 
+    if cred_file is None:
         cred_file = os.getenv('CASDA_CREDENTIALS_CONFIG', './etc/casda.ini')
     parser = configparser.ConfigParser()
     parser.read(cred_file)
@@ -37,3 +37,11 @@ def region_from_tile_centre(ra, dec):
 
     """
     return f"{ra - 2.0}, {ra + 2.0}, {dec - 2.0}, {dec + 2.0}"
+
+
+def tile_mosaic_name(components):
+    """Deterministic name for a mosaicked tile from individual tiles.
+
+    """
+    components.sort()
+    return '_'.join(components)

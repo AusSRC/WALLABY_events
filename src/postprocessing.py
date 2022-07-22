@@ -7,9 +7,10 @@ import json
 import asyncio
 import asyncpg
 
-from src.utils import parse_config, generate_tile_uuid, region_from_tile_centre
+from src.utils import parse_config, generate_tile_uuid, region_from_tile_centre, \
+                      tile_mosaic_name
 from src.logic import get_observation_pairs, get_adjacent_tiles, get_tile_groups, \
-                  adjacent_below, adjacent_above, adjacent_right, adjacent_left
+                      adjacent_below, adjacent_above, adjacent_right, adjacent_left
 from src.workflow_publisher import WorkflowPublisher
 
 
@@ -114,15 +115,12 @@ async def adjacent_tiles(conn, publisher, pipeline_key, res):
     pairs = get_adjacent_tiles(res)
     for (i, j) in pairs:
         # Check job not complete
-        # TODO(austin): reverse name check may not be required
         tileA = res[i]
         tileB = res[j]
-        name = f"{tileA['identifier']}_{tileB['identifier']}"
-        reverse_name = f"{tileB['identifier']}_{tileA['identifier']}"
+        name = tile_mosaic_name([tileA['identifier'], tileB['identifier']])
         completed_job = await conn.fetch(
-            "SELECT * FROM wallaby.postprocessing \
-            WHERE (name = $1 OR name = $2) AND status = 'COMPLETED'",
-            name, reverse_name
+            "SELECT * FROM wallaby.postprocessing WHERE name = $1 AND status = 'COMPLETED'",
+            name
         )
         if not completed_job:
             logging.info(
@@ -361,7 +359,7 @@ async def adjacent_regions_three_tiles(conn, publisher, pipeline_key, res):
         logging.info(
             f'Found adjacent tiles ({name_i}, {name_j}, {name_k})'
         )
-        name = f"{name_i}_{name_j}_{name_k}"
+        name = tile_mosaic_name([name_i, name_j, name_k])
         completed_job = await conn.fetch(
             "SELECT * FROM wallaby.postprocessing \
             WHERE (name = $1) AND status = 'COMPLETED'",
