@@ -92,6 +92,28 @@ async def workflow_queue(event_loop, config):
 
 @pytest.mark.asyncio
 @pytest.fixture
+async def casda_subscriber(config, event_loop):
+    db_dsn, r_dsn, pipeline = config
+    casda_credentials = parse_casda_credentials()
+
+    # Initialise subscriber
+    subscriber = CASDASubscriber()
+    await subscriber.setup(
+        event_loop,
+        db_dsn,
+        r_dsn['dsn'],
+        casda_credentials,
+        pipeline['quality_check_key'],
+        WALLABY_PROJECT_CODE
+    )
+    await subscriber.consume()
+    await asyncio.sleep(SLEEP)
+    yield
+    await subscriber.close()
+
+
+@pytest.mark.asyncio
+@pytest.fixture
 async def observation_NGC5044_3A(event_loop, casda_queue):
     """Submit an event for NGC5044 Tile 3A to the CASDA queue.
 
@@ -138,31 +160,16 @@ async def observation_NGC5044_3B(event_loop, casda_queue):
     return data
 
 
+# TODO(austin): debug - not passing on first run...
 @pytest.mark.asyncio
-async def test_receive_new_observation(config, event_loop, database_pool, workflow_queue, observation_NGC5044_3A):
+async def test_receive_new_observation(config, event_loop, casda_subscriber, database_pool, workflow_queue, observation_NGC5044_3A):  # noqa
     """On receiving a new WALLABY observation.
     Entry should appear in the database and trigger the footprint check pipeline.
     Tests behaviour of the casda_subscriber.py code.
 
     """
-    db_dsn, r_dsn, pipeline = config
-    casda_credentials = parse_casda_credentials()
-
-    # Initialise subscriber
-    subscriber = CASDASubscriber()
-    await subscriber.setup(
-        event_loop,
-        db_dsn,
-        r_dsn['dsn'],
-        casda_credentials,
-        pipeline['quality_check_key'],
-        WALLABY_PROJECT_CODE
-    )
-    # TODO(austin): sleep more? not receiving message or updating database in time
-    # on the first run of the test after setup
-    await subscriber.consume()
     await asyncio.sleep(SLEEP)
-    await subscriber.close()
+    _, _, pipeline = config
 
     # Test database entry
     async with database_pool.acquire() as conn:
@@ -176,18 +183,16 @@ async def test_receive_new_observation(config, event_loop, database_pool, workfl
     msg = await queue.get()
     body = json.loads(msg.body)
     assert(body['pipeline_key'] == pipeline['quality_check_key'])
-    assert(queue.declaration_result.message_count == 1)
 
 
 @pytest.mark.asyncio
-async def test_process_observation_pairs(config, event_loop, database_pool, workflow_queue, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
+async def test_process_observation_pairs(config, event_loop, casda_subscriber, database_pool, workflow_queue, observation_NGC5044_3A, observation_NGC5044_3B):  # noqa
     """On receiving a two WALLABY observation for a given tile.
     Both entries should appear in the database and should trigger the first post-processing pipeline.
     Tests postprocessing.py code.
 
     """
     _, _, pipeline = config
-    queue, exchange = workflow_queue
 
     # pass quality check
     # TODO(austin): generate UUID from observations
@@ -211,6 +216,7 @@ async def test_process_observation_pairs(config, event_loop, database_pool, work
         )
 
     # run postprocessing
+    queue, exchange = workflow_queue
     await queue.bind(exchange, routing_key="pipeline")
     await process_observations(event_loop, config=config)
 
@@ -222,18 +228,23 @@ async def test_process_observation_pairs(config, event_loop, database_pool, work
         )
         assert(job is not None)
 
-    # assert postprocessing pipeline message published
+    # assert each observation message
+    await asyncio.sleep(SLEEP)
+    msgA = await queue.get()
+    assert(json.loads(msgA.body)['pipeline_key'] == pipeline['quality_check_key'])
+    msgB = await queue.get()
+    assert(json.loads(msgB.body)['pipeline_key'] == pipeline['quality_check_key'])
+
+    # wait for postprocessing entry
+    await asyncio.sleep(SLEEP)
     msg = await queue.get()
     body = json.loads(msg.body)
-    print(body)
-    # files = f"{body['params']['FOOTPRINTS']}, {body['params']['WEIGHTS']}"
-    # assert(body['pipeline_key'] == pipeline['postprocessing_key'])
-    # assert(all(f in files for f in observation_NGC5044_3A['files']))
-    # assert(all(f in files for f in observation_NGC5044_3B['files']))
-    # assert(queue.declaration_result.message_count == 1)
+    files = f"{body['params']['FOOTPRINTS']}, {body['params']['WEIGHTS']}"
+    assert(body['pipeline_key'] == pipeline['postprocessing_key'])
+    assert(all(f in files for f in observation_NGC5044_3A['files']))
+    assert(all(f in files for f in observation_NGC5044_3B['files']))
 
-    # TODO(austin): database cleanup
-    pass
+    # TODO(austin): database cleanup?
 
 
 @pytest.mark.asyncio
